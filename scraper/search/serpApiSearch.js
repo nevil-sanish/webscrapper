@@ -1,9 +1,8 @@
 const axios = require('axios');
 const { chromium } = require('playwright');
 const { keralaKeywords } = require('./keywordList');
-const { stripHtmlForLlm } = require('../utils/htmlStrip');
-const { extractHackathons } = require('../llm/extract');
 const { checkKeralaRelevance } = require('../utils/normalize');
+const { parseExactHackathonPage } = require('../utils/pageParser');
 
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +12,9 @@ const SERP_API_KEY = process.env.SERP_API_KEY;
 const stateFile = path.join(__dirname, 'searchState.json');
 
 /**
- * Searches Google via SerpApi and scrapes detail pages for hackathons
+ * Searches Google via SerpApi, visits each discovered hackathon exact page,
+ * and parses name, place, mode, and registration end date using pure JS.
+ * Zero LLM API calls.
  */
 async function discoverViaSearch() {
   console.log('Running SerpApi Search Discovery...');
@@ -62,6 +63,7 @@ async function discoverViaSearch() {
           gl: 'in',
           hl: 'en'
         },
+        timeout: 8000
       });
 
       const organic = res.data?.organic_results || [];
@@ -75,52 +77,86 @@ async function discoverViaSearch() {
     }
   }
 
-  // Filter out irrelevant domains (social media, aggregators without details, etc.)
+  // Filter out social media and non-event aggregation lists
   const filteredUrls = Array.from(allUrls).filter(u => {
     return !u.includes('facebook.com') && 
            !u.includes('twitter.com') && 
            !u.includes('x.com') && 
            !u.includes('youtube.com') &&
            !u.includes('instagram.com') &&
-           !u.includes('linkedin.com/posts');
-  }).slice(0, 10); // Take top 10 relevant URLs per run
+           !u.includes('linkedin.com') &&
+           !u.includes('reddit.com') &&
+           !u.includes('wikipedia.org');
+  }).slice(0, 10); // Inspect top 10 candidate URLs per run
 
-  console.log(`Discovered ${allUrls.size} URLs, inspecting top ${filteredUrls.length} relevant URLs...`);
+  console.log(`Discovered ${allUrls.size} URLs, inspecting ${filteredUrls.length} exact event pages...`);
   const hackathons = [];
 
-  // Scrape discovered URLs
-  if (filteredUrls.length > 0) {
-    let browser;
+  let browser = null;
+
+  for (let url of filteredUrls) {
     try {
-      browser = await chromium.launch({ headless: true });
-      for (let url of filteredUrls) {
-        try {
-          const page = await browser.newPage();
-          await page.setExtraHTTPHeaders({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      let html = null;
 
-          const html = await page.content();
-          const cleanText = stripHtmlForLlm(html);
+      // 1. First attempt fast HTTP fetch
+      try {
+        const pageRes = await axios.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          timeout: 8000
+        });
+        if (pageRes.data && typeof pageRes.data === 'string' && pageRes.data.length > 500) {
+          html = pageRes.data;
+        }
+      } catch (httpErr) {
+        // Fallback to browser below
+      }
 
-          if (cleanText && cleanText.length > 50) {
-            const extracted = await extractHackathons(cleanText, url);
-            for (let h of extracted) {
-              h.source = 'serpapi-search';
-              h.isKeralaRelevant = checkKeralaRelevance(h);
-              hackathons.push(h);
-            }
-          }
-          await page.close();
-          await new Promise(r => setTimeout(r, 1000));
-        } catch (pageError) {
-          console.error(`Error scraping search result URL ${url}:`, pageError.message);
+      // 2. Browser fallback for JavaScript heavy SPAs
+      if (!html || html.length < 1000) {
+        if (!browser) {
+          browser = await chromium.launch({ headless: true });
+        }
+        const page = await browser.newPage();
+        await page.setExtraHTTPHeaders({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(1500);
+        html = await page.content();
+        await page.close();
+      }
+
+      if (html) {
+        const parsed = parseExactHackathonPage(html, url);
+        if (parsed && parsed.name && parsed.registrationDeadline) {
+          const h = {
+            name: parsed.name,
+            startDate: parsed.registrationDeadline,
+            endDate: parsed.registrationDeadline,
+            registrationDeadline: parsed.registrationDeadline,
+            location: parsed.place,
+            mode: parsed.mode,
+            organizer: null,
+            prize: null,
+            eligibility: null,
+            tags: [],
+            description: parsed.description,
+            sourceUrl: url,
+            source: 'search-exact-page'
+          };
+          h.isKeralaRelevant = checkKeralaRelevance(h);
+          hackathons.push(h);
+          console.log(`Parsed exact hackathon from search: "${h.name}" (mode: ${h.mode}, place: ${h.location}, regDeadline: ${h.startDate})`);
         }
       }
-    } catch (browserError) {
-      console.error('Playwright launch error in SerpApi discovery:', browserError.message);
-    } finally {
-      if (browser) await browser.close();
+    } catch (pageError) {
+      console.error(`Error parsing exact search page ${url}:`, pageError.message);
     }
+  }
+
+  if (browser) {
+    await browser.close();
   }
 
   return hackathons;

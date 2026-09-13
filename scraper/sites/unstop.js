@@ -1,12 +1,19 @@
 const axios = require('axios');
 const { checkKeralaRelevance } = require('../utils/normalize');
-const { extractRegistrationDeadlineFromTimeline } = require('../llm/extract');
+const { parseDateToYMD } = require('../utils/pageParser');
 
 /**
- * Scrape Unstop hackathons across all pagination pages with deep opportunity detail extraction
+ * Scrapes Unstop hackathons across pagination pages and visits each
+ * hackathon's exact competition page/details to extract:
+ * 1. name
+ * 2. place (location)
+ * 3. mode (online, offline, both)
+ * 4. registration end date (from the registration closing time interval)
+ * 
+ * Completely deterministic without any LLM API calls.
  */
 async function scrapeUnstop() {
-  console.log('Scraping Unstop (Multi-page search + detail extraction)...');
+  console.log('Scraping Unstop (Multi-page search + exact hackathon page extraction)...');
   const hackathons = [];
   
   try {
@@ -15,14 +22,14 @@ async function scrapeUnstop() {
     const maxPages = 6;
     const opportunityIds = [];
     
-    // Step 1: Gather hackathons across all search pages
+    // Step 1: Discover hackathons across search pages
     while (hasMore && page <= maxPages) {
       console.log(`Fetching Unstop search page ${page}...`);
       const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open&usertype=students&domain=2`;
       
       const res = await axios.get(searchUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json'
         },
         timeout: 10000
@@ -47,21 +54,21 @@ async function scrapeUnstop() {
         hasMore = false;
       } else {
         page++;
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 200));
       }
     }
     
-    console.log(`Found ${opportunityIds.length} Unstop hackathons. Fetching full details...`);
+    console.log(`Found ${opportunityIds.length} Unstop hackathons. Visiting exact pages...`);
     
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    // Step 2: Fetch detailed info for each hackathon (mode, place, stages and timelines)
+    // Step 2: Visit each hackathon's exact page & competition details
     for (let opp of opportunityIds) {
       try {
         const detailRes = await axios.get(`https://unstop.com/api/public/competition/${opp.id}`, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json'
           },
           timeout: 8000
@@ -70,63 +77,52 @@ async function scrapeUnstop() {
         const comp = detailRes.data?.data?.competition;
         if (!comp || !comp.title) continue;
 
-        const endDate = comp.end_date ? new Date(comp.end_date) : null;
-        if (endDate && endDate < today) {
-          // Completed in the past, skip
-          continue;
+        // Extract Registration Closing Date from the dates interval section:
+        // 1. Primary: regnRequirements.start_regn_dt -> end_regn_dt
+        let regClosingDate = null;
+        if (comp.regnRequirements?.end_regn_dt) {
+          regClosingDate = parseDateToYMD(comp.regnRequirements.end_regn_dt);
         }
 
-        // Build stages & timelines schedule text for LLM analysis
-        let timelineText = '';
-        if (Array.isArray(comp.rounds)) {
+        // 2. Secondary: If not found, check rounds with registration / submission intervals
+        if (!regClosingDate && Array.isArray(comp.rounds)) {
           for (let r of comp.rounds) {
             if (Array.isArray(r.details)) {
               for (let d of r.details) {
-                timelineText += `Stage: ${d.title || r.title || 'Round'} | Start: ${d.start_date || 'N/A'} | End: ${d.end_date || 'N/A'}\n`;
+                const titleLower = `${d.title || ''} ${r.title || ''}`.toLowerCase();
+                if (/registration|regn|apply|application|submission/i.test(titleLower) && d.end_date) {
+                  const candidate = parseDateToYMD(d.end_date);
+                  if (candidate && (!regClosingDate || candidate < regClosingDate)) {
+                    regClosingDate = candidate;
+                  }
+                }
               }
             }
           }
         }
-        if (Array.isArray(comp.datesToshow)) {
-          for (let d of comp.datesToshow) {
-            timelineText += `Key Date: ${d.title} on ${d.important_date}\n`;
-          }
-        }
 
-        // Determine Registration Deadline:
-        // 1. If stages timeline exists, pass to LLM to find exact registration / submission closing date
-        let regDeadline = null;
-        if (timelineText.trim()) {
-          regDeadline = await extractRegistrationDeadlineFromTimeline(timelineText, comp.title);
-        }
-
-        // 2. Fallback to structured regnRequirements if LLM didn't return a date
-        if (!regDeadline) {
-          regDeadline = comp.regnRequirements?.end_regn_dt || comp.regn_end_date || null;
-        }
-
-        // 3. Fallback to datesToshow registration item or comp.end_date
-        if (!regDeadline && Array.isArray(comp.datesToshow)) {
-          const regItem = comp.datesToshow.find(d => /registration|regn/i.test(d.title));
+        // 3. Fallback: datesToshow items
+        if (!regClosingDate && Array.isArray(comp.datesToshow)) {
+          const regItem = comp.datesToshow.find(d => /registration|regn|apply|round 1/i.test(d.title));
           if (regItem?.important_date) {
-            regDeadline = regItem.important_date;
+            regClosingDate = parseDateToYMD(regItem.important_date);
           }
         }
-        if (!regDeadline) {
-          regDeadline = comp.end_date || null;
+
+        // 4. Ultimate fallback: comp.regn_end_date or comp.end_date
+        if (!regClosingDate) {
+          regClosingDate = parseDateToYMD(comp.regn_end_date || comp.end_date);
         }
 
-        if (!regDeadline) continue;
-        const deadlineDate = new Date(regDeadline);
-        if (isNaN(deadlineDate.getTime())) continue;
+        if (!regClosingDate) continue;
 
         // Filter: only events whose registration deadline is today or in the future
-        const deadlineDay = new Date(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
-        if (deadlineDay < today) {
+        if (regClosingDate < todayYMD) {
           // Registration closed in the past, skip
           continue;
         }
 
+        // Extract Place & Mode
         const address = comp.address_with_country_logo;
         let location = 'Online';
         let mode = 'online';
@@ -141,7 +137,7 @@ async function scrapeUnstop() {
           location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : 'Hybrid';
         } else if (isOffline) {
           mode = 'offline';
-          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : 'In-person';
+          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : (comp.location || 'In-person');
         }
         
         let sourceUrl = `https://unstop.com/hackathons/${opp.id}`;
@@ -153,9 +149,9 @@ async function scrapeUnstop() {
           
         const h = {
           name: comp.title,
-          startDate: regDeadline,
-          endDate: comp.end_date || regDeadline,
-          registrationDeadline: regDeadline,
+          startDate: regClosingDate,
+          endDate: parseDateToYMD(comp.end_date) || regClosingDate,
+          registrationDeadline: regClosingDate,
           location: location,
           mode: mode,
           organizer: comp.organization?.name || null,
@@ -170,18 +166,18 @@ async function scrapeUnstop() {
         h.isKeralaRelevant = checkKeralaRelevance(h);
         hackathons.push(h);
       } catch (detailErr) {
-        // Skip individual failure
+        // Skip individual network failure
       }
       
-      // Gentle pause between API calls
-      await new Promise(r => setTimeout(r, 150));
+      // Respectful pause between API calls
+      await new Promise(r => setTimeout(r, 100));
     }
     
   } catch (error) {
     console.error('Unstop Scrape Error:', error.message);
   }
   
-  console.log(`Extracted ${hackathons.length} hackathons from Unstop.`);
+  console.log(`Extracted ${hackathons.length} hackathons from Unstop exact pages.`);
   return hackathons;
 }
 
