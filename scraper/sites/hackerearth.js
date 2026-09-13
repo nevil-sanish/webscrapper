@@ -17,10 +17,10 @@ async function scrapeHackerEarth() {
     
     await page.goto('https://www.hackerearth.com/challenges/hackathon/', { waitUntil: 'domcontentloaded' });
     
-    // HackerEarth often has a specific container for challenges
-    await page.waitForSelector('.challenge-list', { timeout: 10000 }).catch(() => {});
+    // Wait for HackerEarth to render the list
+    await page.waitForTimeout(5000);
     
-    const listingsHtml = await page.$eval('.challenge-list', el => el.innerHTML).catch(() => null);
+    const listingsHtml = await page.evaluate(() => document.body.innerHTML);
     
     if (listingsHtml) {
       const cleanText = stripHtmlForLlm(listingsHtml);

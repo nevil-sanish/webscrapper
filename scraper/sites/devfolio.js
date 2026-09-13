@@ -9,9 +9,7 @@ async function scrapeDevfolio() {
   const hackathons = [];
   try {
     // Devfolio search API
-    const response = await axios.post('https://api.devfolio.co/api/search/hackathons', {
-      type: "application/json"
-    }, {
+    const response = await axios.post('https://api.devfolio.co/api/search/hackathons', {}, {
       headers: {
         'Content-Type': 'application/json'
       }
@@ -20,16 +18,19 @@ async function scrapeDevfolio() {
     // The actual response format might vary, but usually they return an array of hits
     // If the API signature is different in 2024, this might need updating. 
     // This is a best-effort based on typical Devfolio API structure.
-    const hits = response.data?.hits || [];
+    const hits = response.data?.hits?.hits || [];
 
-    for (let hit of hits) {
+    for (let item of hits) {
+      const hit = item._source;
+      if (!hit) continue;
+
       const h = {
         name: hit.name,
         source: 'devfolio',
         sourceUrl: hit.hackathon_setting?.subdomain ? `https://${hit.hackathon_setting.subdomain}.devfolio.co` : 'https://devfolio.co',
         startDate: hit.starts_at || null,
         endDate: hit.ends_at || null,
-        registrationDeadline: hit.applications_close_at || null,
+        registrationDeadline: hit.hackathon_setting?.reg_ends_at || null,
         location: hit.location || (hit.is_online ? 'Online' : 'Unknown'),
         organizer: hit.organizer_name || null,
         prize: null,

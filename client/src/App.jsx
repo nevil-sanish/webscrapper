@@ -10,7 +10,7 @@ function App() {
   useEffect(() => {
     const fetchHackathons = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/hackathons')
+        const response = await axios.get('/api/hackathons')
         setHackathons(response.data)
       } catch (err) {
         setError(err.message)

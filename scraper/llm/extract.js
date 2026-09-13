@@ -37,8 +37,9 @@ async function extractHackathons(text, sourceUrl) {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt }
       ],
-      model: 'llama3-70b-8192',
-      temperature: 0,
+      model: 'qwen/qwen3.8-27b',
+      temperature: 0.1,
+      response_format: { type: 'json_object' }
     });
 
     const responseContent = chatCompletion.choices[0].message.content.trim();

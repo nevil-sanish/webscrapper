@@ -24,9 +24,12 @@ async function discoverViaSearch() {
   
   for (let query of randomKeywords) {
     try {
-      // NOTE: Google Custom Search requires an API Key and a Search Engine ID (CX)
-      // The provided env vars were OAuth IDs instead, so this endpoint might fail if not proper API keys.
-      // We will implement the correct logic assuming they are valid or will be replaced.
+      // Check if credentials exist and don't look like OAuth Client IDs
+      if (!API_KEY || !CX || API_KEY.includes('googleusercontent.com')) {
+        console.warn('Skipping Google Search Discovery: Invalid or missing Custom Search API Key/CX (Found OAuth credentials instead).');
+        return [];
+      }
+
       const res = await axios.get('https://www.googleapis.com/customsearch/v1', {
         params: {
           key: API_KEY,
