@@ -10,11 +10,22 @@ const { normalizeName, normalizeDate } = require('./normalize');
 function deduplicateHackathons(hackathons) {
   const uniqueList = [];
 
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
   for (let h of hackathons) {
     if (!h || !h.name || typeof h.name !== 'string') continue;
 
-    const normNameNew = normalizeName(h.name);
     const dateNew = normalizeDate(h.startDate);
+    const dateEnd = normalizeDate(h.endDate);
+
+    // Skip events that completed in the past
+    const latestDate = dateEnd || dateNew;
+    if (latestDate && new Date(latestDate) < today) {
+      continue;
+    }
+
+    const normNameNew = normalizeName(h.name);
 
     let match = null;
 

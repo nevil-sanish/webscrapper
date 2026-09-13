@@ -7,6 +7,7 @@ const REFRESH_TOKEN = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
 let calendar = null;
+let cachedCalendarSummaries = null;
 
 if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
   const oauth2Client = new google.auth.OAuth2(
@@ -26,26 +27,88 @@ function isCalendarConfigured() {
 }
 
 /**
- * Creates a calendar event for a hackathon if it does not already exist.
+ * Loads all existing upcoming calendar event names into memory for instant duplicate check
+ */
+async function getExistingCalendarSummaries() {
+  if (cachedCalendarSummaries) return cachedCalendarSummaries;
+  cachedCalendarSummaries = new Set();
+  
+  if (!calendar) return cachedCalendarSummaries;
+
+  try {
+    const res = await calendar.events.list({
+      calendarId: CALENDAR_ID,
+      timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      maxResults: 2500,
+      singleEvents: true,
+    });
+
+    for (let item of res.data.items || []) {
+      if (item.summary) {
+        cachedCalendarSummaries.add(item.summary.trim().toLowerCase());
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching existing calendar events for deduplication:', error.message);
+  }
+
+  return cachedCalendarSummaries;
+}
+
+/**
+ * Creates a single-day calendar event for a hackathon on its start date if it does not already exist.
+ * Ignores any hackathon that started in the past.
  * @param {Object} hackathon - The hackathon object
  * @returns {Promise<boolean>} - True if newly added, false if skipped or failed
  */
 async function addEventToCalendar(hackathon) {
-  if (!calendar) {
-    return false;
-  }
+  if (!calendar) return false;
 
   if (!hackathon.name || !hackathon.startDate) {
-    console.warn(`Skipping calendar event for "${hackathon.name || 'Unnamed'}": Missing name or start date.`);
     return false;
   }
 
   const start = new Date(hackathon.startDate);
-  const end = hackathon.endDate ? new Date(hackathon.endDate) : start;
+  if (isNaN(start.getTime())) {
+    return false;
+  }
 
-  // Add event details
+  // Filter: ONLY events that happen today or in the future (startDate >= today)
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const eventStartDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+
+  if (eventStartDay < today) {
+    // Event started in the past, skip
+    return false;
+  }
+
+  // Duplicate Check against cached calendar events
+  const existingSet = await getExistingCalendarSummaries();
+  const normName = hackathon.name.trim().toLowerCase();
+
+  if (existingSet.has(normName)) {
+    return false;
+  }
+
+  // Format: ONLY for the first day (All-day single-day event)
+  const formatYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const startDateStr = formatYMD(eventStartDay);
+  const nextDay = new Date(eventStartDay);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const nextDayStr = formatYMD(nextDay);
+
+  // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
   desc += `Link: ${hackathon.sourceUrl}\n`;
+  if (hackathon.startDate) desc += `Start Date: ${new Date(hackathon.startDate).toLocaleDateString()}\n`;
+  if (hackathon.endDate) desc += `End Date: ${new Date(hackathon.endDate).toLocaleDateString()}\n`;
   if (hackathon.organizer) desc += `Organizer: ${hackathon.organizer}\n`;
   if (hackathon.prize) desc += `Prize: ${hackathon.prize}\n`;
   if (hackathon.eligibility) desc += `Eligibility: ${hackathon.eligibility}\n`;
@@ -56,37 +119,20 @@ async function addEventToCalendar(hackathon) {
     location: hackathon.location || 'Online',
     description: desc,
     start: {
-      date: start.toISOString().split('T')[0],
+      date: startDateStr,
     },
     end: {
-      date: end.toISOString().split('T')[0],
+      date: nextDayStr, // Next day ensures it appears ONLY on the start day in Google Calendar
     },
   };
 
   try {
-    // Check if event with this name already exists in Google Calendar
-    const existing = await calendar.events.list({
-      calendarId: CALENDAR_ID,
-      timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      q: hackathon.name,
-      singleEvents: true,
-      maxResults: 10,
-    });
-
-    const isDuplicate = existing.data.items?.some(e => {
-      return e.summary && e.summary.toLowerCase().trim() === hackathon.name.toLowerCase().trim();
-    });
-
-    if (isDuplicate) {
-      console.log(`Calendar event already exists for "${hackathon.name}", skipping duplicate.`);
-      return false;
-    }
-
     const res = await calendar.events.insert({
       calendarId: CALENDAR_ID,
       resource: event,
     });
-    console.log(`Event created in Google Calendar for "${hackathon.name}": ${res.data.htmlLink}`);
+    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr}: ${res.data.htmlLink}`);
+    existingSet.add(normName);
     return true;
   } catch (error) {
     console.error(`Error creating calendar event for "${hackathon.name}":`, error.response?.data?.error?.message || error.message);
