@@ -52,7 +52,10 @@ async function scrapeUnstop() {
     
     console.log(`Found ${opportunityIds.length} Unstop hackathons. Fetching full details...`);
     
-    // Step 2: Fetch detailed info for each hackathon (mode, city, state, prizes)
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Step 2: Fetch detailed info for each hackathon (mode, city, state, upcoming round dates)
     for (let opp of opportunityIds) {
       try {
         const detailRes = await axios.get(`https://unstop.com/api/public/competition/${opp.id}`, {
@@ -65,23 +68,71 @@ async function scrapeUnstop() {
         
         const comp = detailRes.data?.data?.competition;
         if (!comp || !comp.title) continue;
-        
+
+        const endDate = comp.end_date ? new Date(comp.end_date) : null;
+        if (endDate && endDate < today) {
+          // Completed in the past, skip
+          continue;
+        }
+
+        // Gather all candidate dates >= today from raw start, rounds, and datesToshow
+        const candidateDates = [];
+        const rawStart = comp.start_date ? new Date(comp.start_date) : null;
+        if (rawStart && !isNaN(rawStart.getTime()) && rawStart >= today) {
+          candidateDates.push(rawStart);
+        }
+
+        if (Array.isArray(comp.rounds)) {
+          for (let r of comp.rounds) {
+            if (Array.isArray(r.details)) {
+              for (let d of r.details) {
+                if (d.start_date) {
+                  const dDate = new Date(d.start_date);
+                  if (!isNaN(dDate.getTime()) && dDate >= today) {
+                    candidateDates.push(dDate);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (Array.isArray(comp.datesToshow)) {
+          for (let d of comp.datesToshow) {
+            if (d.important_date) {
+              const dDate = new Date(d.important_date);
+              if (!isNaN(dDate.getTime()) && dDate >= today) {
+                candidateDates.push(dDate);
+              }
+            }
+          }
+        }
+
+        let effectiveStartDate = null;
+        if (candidateDates.length > 0) {
+          candidateDates.sort((a, b) => a - b);
+          effectiveStartDate = candidateDates[0].toISOString();
+        } else if (endDate && endDate >= today) {
+          effectiveStartDate = today.toISOString();
+        }
+
+        if (!effectiveStartDate) continue;
+
         const address = comp.address_with_country_logo;
         let location = 'Online';
         let mode = 'online';
-        
-        const locLower = (comp.location || comp.region || '').toLowerCase();
-        if (locLower.includes('offline') || address?.city) {
-          mode = locLower.includes('online') ? 'both' : 'offline';
-          if (address?.city && address?.state) {
-            location = `${address.city}, ${address.state}`;
-          } else if (address?.city) {
-            location = address.city;
-          } else if (address?.state) {
-            location = address.state;
-          } else {
-            location = 'Offline';
-          }
+
+        const regionLower = (comp.region || '').toLowerCase();
+        const locLower = (comp.location || '').toLowerCase();
+        const isOffline = regionLower === 'offline' || locLower.includes('offline') || Boolean(address?.city);
+        const isBoth = (regionLower === 'both' || locLower.includes('both')) || (isOffline && (regionLower.includes('online') || locLower.includes('online')));
+
+        if (isBoth) {
+          mode = 'both';
+          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : 'Hybrid';
+        } else if (isOffline) {
+          mode = 'offline';
+          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : 'In-person';
         }
         
         let sourceUrl = `https://unstop.com/hackathons/${opp.id}`;
@@ -93,7 +144,7 @@ async function scrapeUnstop() {
           
         const h = {
           name: comp.title,
-          startDate: comp.start_date || null,
+          startDate: effectiveStartDate,
           endDate: comp.end_date || null,
           registrationDeadline: comp.regn_end_date || null,
           location: location,
@@ -114,7 +165,7 @@ async function scrapeUnstop() {
       }
       
       // Gentle pause between API calls
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 150));
     }
     
   } catch (error) {

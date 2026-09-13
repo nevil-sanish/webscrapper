@@ -73,14 +73,31 @@ async function addEventToCalendar(hackathon) {
     return false;
   }
 
-  // Filter: ONLY events that happen today or in the future (startDate >= today)
+  // Filter: ONLY events that happen today or in the future
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const eventStartDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  let eventStartDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
 
   if (eventStartDay < today) {
-    // Event started in the past, skip
-    return false;
+    // If the event started earlier, check if it is still ongoing (endDate >= today)
+    if (hackathon.endDate) {
+      const end = new Date(hackathon.endDate);
+      if (!isNaN(end.getTime())) {
+        const eventEndDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        if (eventEndDay >= today) {
+          // Active ongoing hackathon - schedule single-day reminder on today
+          eventStartDay = today;
+        } else {
+          // Event completed in the past
+          return false;
+        }
+      } else {
+        return false;
+      }
+    } else {
+      // Event started in the past with no future end date, skip
+      return false;
+    }
   }
 
   // Duplicate Check against cached calendar events
@@ -104,6 +121,19 @@ async function addEventToCalendar(hackathon) {
   nextDay.setDate(nextDay.getDate() + 1);
   const nextDayStr = formatYMD(nextDay);
 
+  // Determine Google Calendar Color:
+  // - Offline and Both (online & offline) -> Peacock color ("7")
+  // - Online -> Orange color ("6")
+  let colorId = '6'; // Tangerine / Orange (default for online)
+  const mode = (hackathon.mode || '').toLowerCase().trim();
+  const loc = (hackathon.location || '').toLowerCase().trim();
+
+  if (mode === 'offline' || mode === 'both' || mode === 'hybrid' || mode === 'in-person' || mode === 'physical') {
+    colorId = '7'; // Peacock
+  } else if (loc && loc !== 'online' && !loc.includes('online') && loc !== 'virtual') {
+    colorId = '7'; // Peacock
+  }
+
   // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
   desc += `Link: ${hackathon.sourceUrl}\n`;
@@ -118,6 +148,7 @@ async function addEventToCalendar(hackathon) {
     summary: hackathon.name,
     location: hackathon.location || 'Online',
     description: desc,
+    colorId: colorId,
     start: {
       date: startDateStr,
     },
@@ -131,7 +162,7 @@ async function addEventToCalendar(hackathon) {
       calendarId: CALENDAR_ID,
       resource: event,
     });
-    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr}: ${res.data.htmlLink}`);
+    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr} (color: ${colorId === '7' ? 'Peacock' : 'Orange'}): ${res.data.htmlLink}`);
     existingSet.add(normName);
     return true;
   } catch (error) {
