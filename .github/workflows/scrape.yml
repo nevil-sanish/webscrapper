@@ -1,0 +1,40 @@
+name: Hackathon Aggregator Scraper
+
+on:
+  schedule:
+    # Runs at 06:00 UTC every 2 days
+    - cron: '0 6 */2 * *'
+  workflow_dispatch: # Allows manual triggering from GitHub UI
+
+jobs:
+  scrape-and-report:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Run Scraper
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GOOGLE_SEARCH_CLIENT_ID: ${{ secrets.GOOGLE_SEARCH_CLIENT_ID }}
+        GOOGLE_SEARCH_CLIENT_SECRET: ${{ secrets.GOOGLE_SEARCH_CLIENT_SECRET }}
+        SMTP_HOST: ${{ secrets.SMTP_HOST }}
+        SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        SMTP_USER: ${{ secrets.SMTP_USER }}
+        SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        REPORT_EMAIL: ${{ secrets.REPORT_EMAIL }}
+      run: node scraper/run-scraper.js
