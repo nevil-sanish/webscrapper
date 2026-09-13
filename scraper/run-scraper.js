@@ -8,7 +8,6 @@ const { discoverViaSearch } = require('./search/serpApiSearch');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
-const { sendEmailReport } = require('../email/sendReport');
 const { addEventToCalendar, isCalendarConfigured } = require('./utils/calendar');
 
 async function run() {
@@ -28,7 +27,7 @@ async function run() {
   const heData = await scrapeHackerEarth();
   allNewHackathons = allNewHackathons.concat(heData);
 
-  // 4. Google Search Discovery (run one batch per run to save quota)
+  // 4. Google Search Discovery
   const searchData = await discoverViaSearch();
   allNewHackathons = allNewHackathons.concat(searchData);
 
@@ -50,19 +49,11 @@ async function run() {
         }
       }
 
-      console.log(`Successfully added ${newlyAdded.length} new hackathons to Google Calendar.`);
-
-      if (newlyAdded.length > 0) {
-        await sendEmailReport(newlyAdded);
-      } else {
-        console.log('All discovered hackathons already exist in Google Calendar. No new email sent.');
-      }
+      console.log(`Successfully added/updated ${newlyAdded.length} hackathons in Google Calendar.`);
     } else {
       console.warn('\n⚠️  GOOGLE CALENDAR IS NOT CONFIGURED');
       console.warn('GOOGLE_CALENDAR_REFRESH_TOKEN is empty in your .env file.');
       console.warn('Run `node scripts/auth-calendar.js` to authorize your Google Calendar.\n');
-      // Still send email with all discovered unique hackathons
-      await sendEmailReport(uniqueHackathons);
     }
   } else {
     console.log('No hackathons found during this run.');

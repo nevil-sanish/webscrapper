@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node scraper/run-scraper.js",
     "scrape": "node scraper/run-scraper.js",
-    "auth:calendar": "node scripts/auth-calendar.js",
-    "test:email": "node scripts/test-email.js"
+    "auth:calendar": "node scripts/auth-calendar.js"
   },
   "keywords": [],
   "author": "",
@@ -18,7 +17,6 @@
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
     "googleapis": "^180.0.0",
-    "nodemailer": "^10.0.9",
     "playwright": "^1.63.0",
     "server-destroy": "^1.0.1",
     "string-similarity": "^4.0.4"

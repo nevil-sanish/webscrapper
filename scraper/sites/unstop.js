@@ -77,14 +77,31 @@ async function scrapeUnstop() {
         const comp = detailRes.data?.data?.competition;
         if (!comp || !comp.title) continue;
 
-        // Extract Registration Closing Date from the dates interval section:
-        // 1. Primary: regnRequirements.start_regn_dt -> end_regn_dt
+        // Extract Registration / Submission Closing Date:
+        // 1. Primary: If a LIVE round (e.g. Idea Submission, Screening, Round 1) is active,
+        // its end_date is the immediate deadline participants are racing against (e.g. Tejas ends 13 Sep)
         let regClosingDate = null;
-        if (comp.regnRequirements?.end_regn_dt) {
+        if (Array.isArray(comp.rounds)) {
+          for (let r of comp.rounds) {
+            if (Array.isArray(r.details)) {
+              for (let d of r.details) {
+                if (d.status === 'LIVE' && d.end_date) {
+                  const candidate = parseDateToYMD(d.end_date);
+                  if (candidate && (!regClosingDate || candidate < regClosingDate)) {
+                    regClosingDate = candidate;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 2. Secondary: Registration interval from regnRequirements (start_regn_dt -> end_regn_dt)
+        if (!regClosingDate && comp.regnRequirements?.end_regn_dt) {
           regClosingDate = parseDateToYMD(comp.regnRequirements.end_regn_dt);
         }
 
-        // 2. Secondary: If not found, check rounds with registration / submission intervals
+        // 3. Tertiary: Check any rounds with registration / submission titles
         if (!regClosingDate && Array.isArray(comp.rounds)) {
           for (let r of comp.rounds) {
             if (Array.isArray(r.details)) {

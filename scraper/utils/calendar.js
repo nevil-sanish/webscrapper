@@ -301,8 +301,55 @@ async function addEventToCalendar(hackathon) {
   }
 }
 
+/**
+ * Deletes all hackathon calendar events in the configured calendar
+ */
+async function clearAllCalendarEvents() {
+  if (!calendar) {
+    console.warn('Calendar is not configured. Cannot clear events.');
+    return 0;
+  }
+
+  try {
+    const res = await calendar.events.list({
+      calendarId: CALENDAR_ID,
+      timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      maxResults: 2500,
+      singleEvents: true,
+    });
+
+    const items = res.data.items || [];
+    console.log(`Found ${items.length} calendar events to remove.`);
+
+    let deletedCount = 0;
+    for (const item of items) {
+      try {
+        await calendar.events.delete({
+          calendarId: CALENDAR_ID,
+          eventId: item.id
+        });
+        deletedCount++;
+        console.log(`[DELETED] "${item.summary}" (${deletedCount}/${items.length})`);
+      } catch (err) {
+        console.error(`Error deleting event "${item.summary}":`, err.message);
+      }
+    }
+
+    if (cachedCalendarEventsMap) {
+      cachedCalendarEventsMap.clear();
+    }
+
+    console.log(`Successfully removed ${deletedCount} events from Google Calendar.`);
+    return deletedCount;
+  } catch (error) {
+    console.error('Error fetching calendar events to clear:', error.message);
+    return 0;
+  }
+}
+
 module.exports = {
   addEventToCalendar,
+  clearAllCalendarEvents,
   isCalendarConfigured,
   isSouthIndia,
   getEventColorId,
