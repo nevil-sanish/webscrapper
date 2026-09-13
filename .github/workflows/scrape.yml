@@ -2,7 +2,6 @@ name: Hack Scrapper & Calendar Sync
 
 on:
   push:
-    branches: [ main ]
   schedule:
     # Runs at 06:00 UTC every 2 days
     - cron: '0 6 */2 * *'
@@ -35,4 +34,6 @@ jobs:
         GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET || secrets.GOOGLE_SEARCH_CLIENT_SECRET }}
         GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
         GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
-      run: node scraper/run-scraper.js
+      run: |
+        node scripts/delete-filtered.js
+        node scraper/run-scraper.js
