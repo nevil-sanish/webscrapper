@@ -2,115 +2,88 @@ const stringSimilarity = require('string-similarity');
 const { normalizeName, normalizeDate } = require('./normalize');
 
 /**
- * Deduplicates and upserts hackathons into MongoDB
- * @param {Array} newHackathons - List of newly scraped hackathon objects
- * @param {Model} HackathonModel - Mongoose model
- * @returns {Object} - Results { inserted: [], updated: [] }
+ * Deduplicates an in-memory array of scraped hackathon objects.
+ * Merges missing details across duplicate entries.
+ * @param {Array} hackathons - List of newly scraped hackathon objects
+ * @returns {Array} - Deduplicated array of hackathon objects
  */
-async function deduplicateAndUpsert(newHackathons, HackathonModel) {
-  const results = { inserted: [], updated: [] };
-  
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - 7);
+function deduplicateHackathons(hackathons) {
+  const uniqueList = [];
 
-  // Fetch existing future or recent hackathons to compare against to avoid loading whole DB
-  const existingDocs = await HackathonModel.find({
-    $or: [
-      { startDate: { $gte: cutoffDate } },
-      { startDate: null }
-    ]
-  });
-
-  for (let h of newHackathons) {
-    if (!h.name) continue;
+  for (let h of hackathons) {
+    if (!h || !h.name || typeof h.name !== 'string') continue;
 
     const normNameNew = normalizeName(h.name);
     const dateNew = normalizeDate(h.startDate);
 
-    let matchFound = null;
+    let match = null;
 
-    for (let ex of existingDocs) {
+    for (let ex of uniqueList) {
       const normNameEx = normalizeName(ex.name);
       const similarity = stringSimilarity.compareTwoStrings(normNameNew, normNameEx);
 
       if (similarity > 0.85) {
-        // Names are very similar. Check dates if both exist
         const dateEx = ex.startDate;
         if (dateNew && dateEx) {
-          const diffDays = Math.abs((dateNew - dateEx) / (1000 * 60 * 60 * 24));
+          const diffDays = Math.abs((new Date(dateNew) - new Date(dateEx)) / (1000 * 60 * 60 * 24));
           if (diffDays <= 3) {
-            matchFound = ex;
+            match = ex;
             break;
           }
         } else {
-          // If one date is missing but name is >85% similar, treat as match
-          matchFound = ex;
+          match = ex;
           break;
         }
       }
     }
 
-    if (matchFound) {
-      // Update existing document
-      let updated = false;
-      
-      // Merge newly found fields if they were null
-      const fields = ['endDate', 'registrationDeadline', 'location', 'organizer', 'prize', 'eligibility', 'description'];
+    if (match) {
+      // Merge details if missing or default
+      const fields = ['endDate', 'registrationDeadline', 'organizer', 'prize', 'eligibility', 'description'];
       for (let field of fields) {
-        if (!matchFound[field] && h[field]) {
-          matchFound[field] = h[field];
-          updated = true;
+        if (!match[field] && h[field]) {
+          match[field] = h[field];
         }
       }
-      
-      // Merge tags safely
-      if (h.tags && h.tags.length > 0) {
-        const existingTags = new Set(matchFound.tags || []);
-        let addedTag = false;
-        h.tags.forEach(t => {
-          if (!existingTags.has(t)) {
-            matchFound.tags.push(t);
-            addedTag = true;
-          }
-        });
-        if (addedTag) updated = true;
+
+      if ((!match.location || match.location === 'Online') && h.location && h.location !== 'Online') {
+        match.location = h.location;
+      }
+      if ((!match.mode || match.mode === 'unknown') && h.mode && h.mode !== 'unknown') {
+        match.mode = h.mode;
       }
 
-      matchFound.lastUpdatedAt = new Date();
-      await matchFound.save();
-      
-      if (updated) {
-        results.updated.push(matchFound);
+      if (h.isKeralaRelevant) {
+        match.isKeralaRelevant = true;
+      }
+
+      // Merge tags
+      if (h.tags && Array.isArray(h.tags)) {
+        const tagSet = new Set(match.tags || []);
+        h.tags.forEach(t => tagSet.add(t));
+        match.tags = Array.from(tagSet);
       }
     } else {
-      // Insert new document
-      const hDoc = new HackathonModel({
-        name: h.name,
+      uniqueList.push({
+        name: h.name.trim(),
         source: h.source || 'search',
         sourceUrl: h.sourceUrl,
         startDate: dateNew,
         endDate: normalizeDate(h.endDate),
         registrationDeadline: normalizeDate(h.registrationDeadline),
-        location: h.location,
+        mode: h.mode || 'unknown',
+        location: h.location || 'Online',
         organizer: h.organizer,
         prize: h.prize,
         eligibility: h.eligibility,
-        tags: h.tags || [],
+        tags: Array.isArray(h.tags) ? h.tags : [],
         description: h.description,
-        isKeralaRelevant: h.isKeralaRelevant
+        isKeralaRelevant: Boolean(h.isKeralaRelevant)
       });
-      
-      try {
-        await hDoc.save();
-        existingDocs.push(hDoc); // Add to local cache for subsequent dedup in same run
-        results.inserted.push(hDoc);
-      } catch (err) {
-        console.error(`Error inserting hackathon ${h.name}:`, err.message);
-      }
     }
   }
 
-  return results;
+  return uniqueList;
 }
 
-module.exports = { deduplicateAndUpsert };
+module.exports = { deduplicateHackathons };

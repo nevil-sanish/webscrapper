@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { sendEmailReport } = require('./email/sendReport');
+const { sendEmailReport } = require('../email/sendReport');
 
 async function testEmail() {
   console.log('Running Email Test...');

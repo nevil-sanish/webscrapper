@@ -11,3 +11,6 @@ client/dist/
 
 # System files
 .DS_Store
+
+# Local state
+scraper/search/searchState.json

@@ -1,12 +1,12 @@
 {
-  "name": "webscrapper",
+  "name": "hack-scrapper",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Scrapes and tracks hackathons directly into Google Calendar and sends email digests.",
+  "main": "scraper/run-scraper.js",
   "scripts": {
-    "start": "node server/app.js",
-    "dev:server": "nodemon server/app.js",
+    "start": "node scraper/run-scraper.js",
     "scrape": "node scraper/run-scraper.js",
+    "auth:calendar": "node scripts/auth-calendar.js",
     "test:email": "node scripts/test-email.js"
   },
   "keywords": [],
@@ -16,16 +16,12 @@
   "dependencies": {
     "axios": "^1.20.0",
     "cheerio": "^1.2.0",
-    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
+    "googleapis": "^180.0.0",
     "groq-sdk": "^1.6.0",
-    "mongoose": "^9.10.0",
     "nodemailer": "^10.0.9",
     "playwright": "^1.63.0",
+    "server-destroy": "^1.0.1",
     "string-similarity": "^4.0.4"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
   }
 }

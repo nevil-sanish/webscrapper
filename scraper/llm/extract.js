@@ -11,7 +11,8 @@ const SYSTEM_PROMPT = `You are a data extraction engine. You will be given a fra
   "startDate": string (ISO 8601 or null if unknown),
   "endDate": string (ISO 8601 or null),
   "registrationDeadline": string (ISO 8601 or null),
-  "location": string,
+  "location": string (Format exactly as "City, State", e.g., "Kochi, Kerala", or "Online"),
+  "mode": string (must be exactly one of: "online", "offline", "both", or null),
   "organizer": string or null,
   "prize": string or null,
   "eligibility": string or null,
@@ -40,15 +41,29 @@ async function extractHackathons(text, sourceUrl) {
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: prompt }
         ],
-        model: 'llama3-70b-8192',
-        temperature: 0
+        model: 'qwen/qwen3.8-27b',
+        temperature: 0,
+        max_tokens: 800
       });
 
       const responseContent = chatCompletion.choices[0].message.content.trim();
       // In case the model adds markdown formatting despite instructions
       const cleanJsonStr = responseContent.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
       
-      const parsed = JSON.parse(cleanJsonStr);
+      let parsed = null;
+      try {
+        parsed = JSON.parse(cleanJsonStr);
+      } catch (jsonErr) {
+        // Recover from truncation by finding the last closed object
+        const lastObjEnd = cleanJsonStr.lastIndexOf('}');
+        if (lastObjEnd !== -1) {
+          try {
+            const recovered = cleanJsonStr.slice(0, lastObjEnd + 1) + ']';
+            parsed = JSON.parse(recovered);
+          } catch (e2) {}
+        }
+        if (!parsed) throw jsonErr;
+      }
       
       // Validate output is array
       if (Array.isArray(parsed)) {

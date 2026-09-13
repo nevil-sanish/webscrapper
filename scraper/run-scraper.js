@@ -1,77 +1,67 @@
 require('dotenv').config();
-const mongoose = require('mongoose');
 
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
-const { scrapeDevpost } = require('./sites/devpost');
 const { scrapeUnstop } = require('./sites/unstop');
 const { scrapeHackerEarth } = require('./sites/hackerearth');
-const { discoverViaSearch } = require('./search/googleSearch');
+const { discoverViaSearch } = require('./search/serpApiSearch');
 
 // Utils
-const { deduplicateAndUpsert } = require('./utils/dedup');
-const Hackathon = require('../server/models/Hackathon');
-const Meta = require('../server/models/Meta');
-const connectDB = require('../server/config/db');
+const { deduplicateHackathons } = require('./utils/dedup');
 const { sendEmailReport } = require('../email/sendReport');
+const { addEventToCalendar } = require('./utils/calendar');
 
 async function run() {
   console.log('Starting Hack Scrapper Run...');
-  
-  try {
-    await connectDB();
-  } catch (err) {
-    console.error('Failed to initialize run', err);
-    process.exit(1);
-  }
 
   let allNewHackathons = [];
 
-  // Scrape Devfolio
+  // 1. Scrape Devfolio
   const devfolioData = await scrapeDevfolio();
   allNewHackathons = allNewHackathons.concat(devfolioData);
 
-  // Scrape Devpost
-  const devpostData = await scrapeDevpost();
-  allNewHackathons = allNewHackathons.concat(devpostData);
-
-  // Scrape Unstop
+  // 2. Scrape Unstop
   const unstopData = await scrapeUnstop();
   allNewHackathons = allNewHackathons.concat(unstopData);
 
-  // Scrape HackerEarth
+  // 3. Scrape HackerEarth
   const heData = await scrapeHackerEarth();
   allNewHackathons = allNewHackathons.concat(heData);
 
-  // Google Search Discovery (run one batch per run to save quota)
+  // 4. Google Search Discovery (run one batch per run to save quota)
   const searchData = await discoverViaSearch();
   allNewHackathons = allNewHackathons.concat(searchData);
 
   console.log(`\nTotal scraped/extracted: ${allNewHackathons.length}`);
   
   if (allNewHackathons.length > 0) {
-    // Deduplicate and upsert to MongoDB
-    console.log('Deduplicating and saving to database...');
-    const { inserted, updated } = await deduplicateAndUpsert(allNewHackathons, Hackathon);
-    
-    console.log(`Inserted ${inserted.length} new hackathons.`);
-    console.log(`Updated ${updated.length} existing hackathons.`);
-    
-    // Send email report with only the newly inserted ones
-    await sendEmailReport(inserted);
+    // In-memory deduplication across all sources
+    console.log('Deduplicating discovered hackathons...');
+    const uniqueHackathons = deduplicateHackathons(allNewHackathons);
+    console.log(`Found ${uniqueHackathons.length} unique hackathons.`);
+
+    // Add unique hackathons to Google Calendar (skips duplicates in Calendar)
+    const newlyAdded = [];
+    for (let h of uniqueHackathons) {
+      const added = await addEventToCalendar(h);
+      if (added) {
+        newlyAdded.push(h);
+      }
+    }
+
+    console.log(`Successfully added ${newlyAdded.length} new hackathons to Google Calendar.`);
+
+    // Send email report with the newly added hackathons
+    if (newlyAdded.length > 0) {
+      await sendEmailReport(newlyAdded);
+    } else {
+      console.log('All discovered hackathons already exist in Google Calendar. No new email sent.');
+    }
   } else {
     console.log('No hackathons found during this run.');
   }
 
-  // Record last run timestamp
-  await Meta.findOneAndUpdate(
-    { key: 'lastRunTimestamp' },
-    { value: new Date().toISOString() },
-    { upsert: true }
-  );
-
-  console.log('Run complete. Closing database connection.');
-  await mongoose.disconnect();
+  console.log('Hack Scrapper run complete.');
 }
 
 run().catch(console.error);

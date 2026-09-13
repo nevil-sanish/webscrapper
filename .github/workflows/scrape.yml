@@ -1,4 +1,4 @@
-name: Hackathon Aggregator Scraper
+name: Hack Scrapper
 
 on:
   schedule:
@@ -28,13 +28,15 @@ jobs:
 
     - name: Run Scraper
       env:
-        MONGODB_URI: ${{ secrets.MONGODB_URI }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
-        GOOGLE_SEARCH_ENGINE_ID: ${{ secrets.GOOGLE_SEARCH_ENGINE_ID }}
+        SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
         SMTP_HOST: ${{ secrets.SMTP_HOST }}
         SMTP_PORT: ${{ secrets.SMTP_PORT }}
         SMTP_USER: ${{ secrets.SMTP_USER }}
         SMTP_PASS: ${{ secrets.SMTP_PASS }}
         REPORT_EMAIL: ${{ secrets.REPORT_EMAIL }}
+        GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+        GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+        GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
+        GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
       run: node scraper/run-scraper.js

@@ -1,33 +1,31 @@
-/**
- * List of keywords to discover relevant hackathons
- */
 const keralaKeywords = [
-  // Generic
-  '"hackathon" "kerala" 2026',
-  'hackathon in kerala students',
-  '"ideathon" kerala college',
-  '"coding competition" kerala',
-  '"techfest" kerala hackathon',
-  // Cities
-  '"hackathon" "kochi"',
-  '"hackathon" "trivandrum"',
-  '"hackathon" "thiruvananthapuram"',
-  '"hackathon" "calicut" OR "kozhikode"',
-  '"hackathon" "palakkad"',
-  '"hackathon" "kottayam"',
-  '"hackathon" "thrissur"',
-  '"hackathon" "kollam"',
-  '"hackathon" "malappuram"',
-  // Specific platforms with site operators
-  'site:devfolio.co "kerala" hackathon',
-  'site:unstop.com "kerala" hackathon',
-  'site:devpost.com "kerala"',
-  'site:lu.ma "hackathon" "kerala"',
-  'site:konfhub.com "hackathon" "kerala"',
-  'site:mlh.io "kerala"',
-  // GitHub and LinkedIn
-  'site:github.com "hackathon" "kerala"',
-  'site:linkedin.com/events "hackathon" "kerala"'
+  "live hackathons in Kerala",
+  "upcoming hackathons in Kerala",
+  "hackathons happening in Kerala",
+  "hackathon Kerala September 2026",
+  "hackathon Kerala 2026 registration",
+  "online hackathon Kerala 2026",
+  "college hackathon Kerala 2026",
+  "student hackathon Kerala 2026",
+  "hackathon Kochi Kerala 2026",
+  "hackathon Trivandrum Kerala 2026",
+  "hackathon Kozhikode Kerala 2026",
+  "live hackathons in South India",
+  "upcoming hackathons in South India",
+  "hackathons happening in South India",
+  "hackathon South India September 2026",
+  "hackathon South India 2026 registration",
+  "college hackathon South India 2026",
+  "student hackathon South India 2026",
+  "hackathon Bangalore 2026",
+  "hackathon Chennai 2026",
+  "hackathon Hyderabad 2026",
+  "hackathon Tamil Nadu 2026",
+  "hackathon Karnataka 2026",
+  "hackathon Telangana 2026",
+  "hackathon Andhra Pradesh 2026",
+  "best hackathons in kottayam",
+  "all of the hackathons south kerala"
 ];
 
 module.exports = { keralaKeywords };
