@@ -128,9 +128,8 @@ function isSouthIndia(location, description, name) {
 
 /**
  * Determines Google Calendar colorId based on:
- * - Online all -> Green ('10' Basil)
- * - Offline in South India -> Orange ('6' Tangerine)
- * - Offline other -> Purple ('3' Grape)
+ * - Online all -> Blue ('9' Blueberry)
+ * - Offline -> Red ('11' Tomato)
  */
 function getEventColorId(hackathon) {
   const mode = (hackathon.mode || '').toLowerCase().trim();
@@ -141,26 +140,21 @@ function getEventColorId(hackathon) {
 
   // Pure online event
   if (isExplicitOnline && hasNoPhysicalLoc) {
-    return '10'; // Basil (Green)
+    return '9'; // Blueberry (Blue)
   }
 
   if (hasNoPhysicalLoc && !mode.includes('offline') && !mode.includes('in-person') && !mode.includes('both') && !mode.includes('hybrid')) {
-    return '10'; // Basil (Green)
+    return '9'; // Blueberry (Blue)
   }
 
   // Offline or hybrid/both event
-  if (isSouthIndia(hackathon.location, hackathon.description, hackathon.name)) {
-    return '6'; // Tangerine (Orange)
-  }
-
-  return '3'; // Grape (Purple)
+  return '11'; // Tomato (Red)
 }
 
 function getColorName(colorId) {
   switch (colorId) {
-    case '10': return 'Green';
-    case '6': return 'Orange';
-    case '3': return 'Purple';
+    case '9': return 'Blue';
+    case '11': return 'Red';
     default: return colorId;
   }
 }
