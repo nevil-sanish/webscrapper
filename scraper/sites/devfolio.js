@@ -41,14 +41,21 @@ async function scrapeDevfolio() {
         const hit = item._source;
         if (!hit || !hit.name) continue;
 
-        // Skip events that completed in the past
-        const endDate = hit.ends_at ? new Date(hit.ends_at) : null;
-        if (endDate && endDate < today) continue;
+        // Application Closing Date (DO NOT USE hit.starts_at which is the 'runs from' event date)
+        const appClosingDate = hit.hackathon_setting?.reg_ends_at || hit.settings?.reg_ends_at || hit.reg_ends_at;
+        if (!appClosingDate) continue;
+
+        const closingDateObj = new Date(appClosingDate);
+        if (isNaN(closingDateObj.getTime())) continue;
+
+        // Skip events whose application deadline has already passed
+        const closingDay = new Date(closingDateObj.getFullYear(), closingDateObj.getMonth(), closingDateObj.getDate());
+        if (closingDay < today) continue;
 
         const subdomain = hit.hackathon_setting?.subdomain || hit.subdomain || hit.slug;
         const sourceUrl = subdomain ? `https://${subdomain}.devfolio.co` : 'https://devfolio.co/hackathons/open';
 
-        let loc = hit.location || (hit.is_online ? 'Online' : 'In-person');
+        let loc = hit.location || [hit.city, hit.state].filter(Boolean).join(', ') || (hit.is_online ? 'Online' : 'In-person');
         let mode = 'online';
         if (hit.is_online === false) {
           mode = 'offline';
@@ -62,9 +69,10 @@ async function scrapeDevfolio() {
 
         const h = {
           name: hit.name,
-          startDate: hit.starts_at || null,
+          startDate: appClosingDate,
           endDate: hit.ends_at || null,
-          registrationDeadline: hit.hackathon_setting?.reg_ends_at || null,
+          registrationDeadline: appClosingDate,
+          eventConductedDate: hit.starts_at || null, // Keep reference to when hackathon runs
           location: loc,
           mode: mode,
           organizer: hit.tagline || null,

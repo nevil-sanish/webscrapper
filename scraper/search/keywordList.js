@@ -25,7 +25,9 @@ const keralaKeywords = [
   "hackathon Telangana 2026",
   "hackathon Andhra Pradesh 2026",
   "best hackathons in kottayam",
-  "all of the hackathons south kerala"
+  "all of the hackathons south kerala",
+  "site:devpost.com hackathons India 2026 registration",
+  "site:devpost.com open hackathons 2026"
 ];
 
 module.exports = { keralaKeywords };

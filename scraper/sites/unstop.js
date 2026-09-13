@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { checkKeralaRelevance } = require('../utils/normalize');
+const { extractRegistrationDeadlineFromTimeline } = require('../llm/extract');
 
 /**
  * Scrape Unstop hackathons across all pagination pages with deep opportunity detail extraction
@@ -55,7 +56,7 @@ async function scrapeUnstop() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Step 2: Fetch detailed info for each hackathon (mode, city, state, upcoming round dates)
+    // Step 2: Fetch detailed info for each hackathon (mode, place, stages and timelines)
     for (let opp of opportunityIds) {
       try {
         const detailRes = await axios.get(`https://unstop.com/api/public/competition/${opp.id}`, {
@@ -75,9 +76,37 @@ async function scrapeUnstop() {
           continue;
         }
 
-        // Extract Registration Deadline / Date (DO NOT USE comp.start_date which is the 'Posted' date)
-        let regDeadline = comp.regnRequirements?.end_regn_dt || comp.regn_end_date || null;
+        // Build stages & timelines schedule text for LLM analysis
+        let timelineText = '';
+        if (Array.isArray(comp.rounds)) {
+          for (let r of comp.rounds) {
+            if (Array.isArray(r.details)) {
+              for (let d of r.details) {
+                timelineText += `Stage: ${d.title || r.title || 'Round'} | Start: ${d.start_date || 'N/A'} | End: ${d.end_date || 'N/A'}\n`;
+              }
+            }
+          }
+        }
         if (Array.isArray(comp.datesToshow)) {
+          for (let d of comp.datesToshow) {
+            timelineText += `Key Date: ${d.title} on ${d.important_date}\n`;
+          }
+        }
+
+        // Determine Registration Deadline:
+        // 1. If stages timeline exists, pass to LLM to find exact registration / submission closing date
+        let regDeadline = null;
+        if (timelineText.trim()) {
+          regDeadline = await extractRegistrationDeadlineFromTimeline(timelineText, comp.title);
+        }
+
+        // 2. Fallback to structured regnRequirements if LLM didn't return a date
+        if (!regDeadline) {
+          regDeadline = comp.regnRequirements?.end_regn_dt || comp.regn_end_date || null;
+        }
+
+        // 3. Fallback to datesToshow registration item or comp.end_date
+        if (!regDeadline && Array.isArray(comp.datesToshow)) {
           const regItem = comp.datesToshow.find(d => /registration|regn/i.test(d.title));
           if (regItem?.important_date) {
             regDeadline = regItem.important_date;
