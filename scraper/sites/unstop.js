@@ -75,48 +75,28 @@ async function scrapeUnstop() {
           continue;
         }
 
-        // Gather all candidate dates >= today from raw start, rounds, and datesToshow
-        const candidateDates = [];
-        const rawStart = comp.start_date ? new Date(comp.start_date) : null;
-        if (rawStart && !isNaN(rawStart.getTime()) && rawStart >= today) {
-          candidateDates.push(rawStart);
-        }
-
-        if (Array.isArray(comp.rounds)) {
-          for (let r of comp.rounds) {
-            if (Array.isArray(r.details)) {
-              for (let d of r.details) {
-                if (d.start_date) {
-                  const dDate = new Date(d.start_date);
-                  if (!isNaN(dDate.getTime()) && dDate >= today) {
-                    candidateDates.push(dDate);
-                  }
-                }
-              }
-            }
-          }
-        }
-
+        // Extract Registration Deadline / Date (DO NOT USE comp.start_date which is the 'Posted' date)
+        let regDeadline = comp.regnRequirements?.end_regn_dt || comp.regn_end_date || null;
         if (Array.isArray(comp.datesToshow)) {
-          for (let d of comp.datesToshow) {
-            if (d.important_date) {
-              const dDate = new Date(d.important_date);
-              if (!isNaN(dDate.getTime()) && dDate >= today) {
-                candidateDates.push(dDate);
-              }
-            }
+          const regItem = comp.datesToshow.find(d => /registration|regn/i.test(d.title));
+          if (regItem?.important_date) {
+            regDeadline = regItem.important_date;
           }
         }
-
-        let effectiveStartDate = null;
-        if (candidateDates.length > 0) {
-          candidateDates.sort((a, b) => a - b);
-          effectiveStartDate = candidateDates[0].toISOString();
-        } else if (endDate && endDate >= today) {
-          effectiveStartDate = today.toISOString();
+        if (!regDeadline) {
+          regDeadline = comp.end_date || null;
         }
 
-        if (!effectiveStartDate) continue;
+        if (!regDeadline) continue;
+        const deadlineDate = new Date(regDeadline);
+        if (isNaN(deadlineDate.getTime())) continue;
+
+        // Filter: only events whose registration deadline is today or in the future
+        const deadlineDay = new Date(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
+        if (deadlineDay < today) {
+          // Registration closed in the past, skip
+          continue;
+        }
 
         const address = comp.address_with_country_logo;
         let location = 'Online';
@@ -144,9 +124,9 @@ async function scrapeUnstop() {
           
         const h = {
           name: comp.title,
-          startDate: effectiveStartDate,
-          endDate: comp.end_date || null,
-          registrationDeadline: comp.regn_end_date || null,
+          startDate: regDeadline,
+          endDate: comp.end_date || regDeadline,
+          registrationDeadline: regDeadline,
           location: location,
           mode: mode,
           organizer: comp.organization?.name || null,
