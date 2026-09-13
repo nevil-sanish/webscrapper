@@ -64,7 +64,7 @@ async function discoverViaSearch() {
           hl: 'en'
         },
         family: 4,
-        timeout: 10000
+        timeout: 30000
       });
 
       const organic = res.data?.organic_results || [];
