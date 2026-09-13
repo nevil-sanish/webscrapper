@@ -31,34 +31,38 @@ async function extractHackathons(text, sourceUrl) {
 
   const prompt = `Source URL to use: ${sourceUrl}\n\nContent:\n${text}`;
 
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: prompt }
-      ],
-      model: 'qwen/qwen3.8-27b',
-      temperature: 0.1,
-      response_format: { type: 'json_object' }
-    });
+  let attempts = 0;
+  while (attempts < 2) {
+    attempts++;
+    try {
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt }
+        ],
+        model: 'llama3-70b-8192',
+        temperature: 0
+      });
 
-    const responseContent = chatCompletion.choices[0].message.content.trim();
-    // In case the model adds markdown formatting despite instructions
-    const cleanJsonStr = responseContent.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
-    
-    const parsed = JSON.parse(cleanJsonStr);
-    
-    // Validate output is array
-    if (Array.isArray(parsed)) {
-      return parsed;
-    } else {
-      console.error('LLM did not return an array. Returning empty array.');
-      return [];
+      const responseContent = chatCompletion.choices[0].message.content.trim();
+      // In case the model adds markdown formatting despite instructions
+      const cleanJsonStr = responseContent.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
+      
+      const parsed = JSON.parse(cleanJsonStr);
+      
+      // Validate output is array
+      if (Array.isArray(parsed)) {
+        return parsed;
+      } else {
+        console.error('LLM did not return an array. Returning empty array.');
+        return [];
+      }
+    } catch (error) {
+      console.error(`Error during LLM extraction for ${sourceUrl} (Attempt ${attempts}):`, error.message);
+      if (attempts >= 2) {
+        return [];
+      }
     }
-  } catch (error) {
-    console.error(`Error during LLM extraction for ${sourceUrl}:`, error.message);
-    // Could implement 1 retry here, but keeping it simple for now
-    return [];
   }
 }
 

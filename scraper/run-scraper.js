@@ -11,16 +11,17 @@ const { discoverViaSearch } = require('./search/googleSearch');
 // Utils
 const { deduplicateAndUpsert } = require('./utils/dedup');
 const Hackathon = require('../server/models/Hackathon');
+const Meta = require('../server/models/Meta');
+const connectDB = require('../server/config/db');
 const { sendEmailReport } = require('../email/sendReport');
 
 async function run() {
   console.log('Starting Hackathon Aggregator Run...');
   
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('Connected to MongoDB');
+    await connectDB();
   } catch (err) {
-    console.error('Failed to connect to MongoDB', err.message);
+    console.error('Failed to initialize run', err);
     process.exit(1);
   }
 
@@ -61,6 +62,13 @@ async function run() {
   } else {
     console.log('No hackathons found during this run.');
   }
+
+  // Record last run timestamp
+  await Meta.findOneAndUpdate(
+    { key: 'lastRunTimestamp' },
+    { value: new Date().toISOString() },
+    { upsert: true }
+  );
 
   console.log('Run complete. Closing database connection.');
   await mongoose.disconnect();

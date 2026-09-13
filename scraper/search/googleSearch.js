@@ -5,10 +5,11 @@ const { stripHtmlForLlm } = require('../utils/htmlStrip');
 const { extractHackathons } = require('../llm/extract');
 const { checkKeralaRelevance } = require('../utils/normalize');
 
+const Meta = require('../../server/models/Meta');
 require('dotenv').config();
 
-const API_KEY = process.env.GOOGLE_SEARCH_CLIENT_ID; // Depending on how you configure it, this could be API key
-const CX = process.env.GOOGLE_SEARCH_CLIENT_SECRET; // This would normally be the Search Engine ID
+const API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
+const CX = process.env.GOOGLE_SEARCH_ENGINE_ID;
 
 /**
  * Searches Google and scrapes results for hackathons
@@ -17,18 +18,30 @@ async function discoverViaSearch() {
   console.log('Running Google Custom Search Discovery...');
   const allUrls = new Set();
   
-  // To avoid hitting rate limits easily, we might only pick 1-2 keywords per run
-  const randomKeywords = [
-    keralaKeywords[Math.floor(Math.random() * keralaKeywords.length)]
-  ];
+  if (!API_KEY || !CX || API_KEY.includes('googleusercontent.com')) {
+    console.warn('Skipping Google Search Discovery: Invalid or missing Custom Search API Key/CX.');
+    return [];
+  }
+
+  // Fetch last used index from DB
+  let lastIndexDoc = await Meta.findOne({ key: 'lastKeywordIndex' });
+  let currentIndex = lastIndexDoc ? lastIndexDoc.value : 0;
   
-  for (let query of randomKeywords) {
+  const keywordsToUse = [];
+  const numKeywords = 5;
+  for (let i = 0; i < numKeywords; i++) {
+    keywordsToUse.push(keralaKeywords[(currentIndex + i) % keralaKeywords.length]);
+  }
+  
+  // Save next index
+  await Meta.findOneAndUpdate(
+    { key: 'lastKeywordIndex' },
+    { value: (currentIndex + numKeywords) % keralaKeywords.length },
+    { upsert: true }
+  );
+  
+  for (let query of keywordsToUse) {
     try {
-      // Check if credentials exist and don't look like OAuth Client IDs
-      if (!API_KEY || !CX || API_KEY.includes('googleusercontent.com')) {
-        console.warn('Skipping Google Search Discovery: Invalid or missing Custom Search API Key/CX (Found OAuth credentials instead).');
-        return [];
-      }
 
       const res = await axios.get('https://www.googleapis.com/customsearch/v1', {
         params: {

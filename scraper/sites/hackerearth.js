@@ -17,19 +17,41 @@ async function scrapeHackerEarth() {
     
     await page.goto('https://www.hackerearth.com/challenges/hackathon/', { waitUntil: 'domcontentloaded' });
     
-    // Wait for HackerEarth to render the list
-    await page.waitForTimeout(5000);
+    let hasNext = true;
+    let pageNum = 1;
     
-    const listingsHtml = await page.evaluate(() => document.body.innerHTML);
-    
-    if (listingsHtml) {
-      const cleanText = stripHtmlForLlm(listingsHtml);
-      const extracted = await extractHackathons(cleanText, 'https://www.hackerearth.com/challenges/hackathon/');
+    while (hasNext && pageNum <= 5) { // Cap at 5 pages for HackerEarth
+      console.log(`Fetching HackerEarth page ${pageNum}...`);
+      await page.waitForTimeout(5000); // Wait for challenges to render
       
-      for (let h of extracted) {
-        h.source = 'hackerearth';
-        h.isKeralaRelevant = checkKeralaRelevance(h);
-        hackathons.push(h);
+      const listingsHtml = await page.evaluate(() => {
+        const container = document.querySelector('.challenge-list') || document.querySelector('.challenges-container') || document.querySelector('.challenges-list');
+        return container ? container.innerHTML : null;
+      });
+      
+      if (listingsHtml) {
+        const cleanText = stripHtmlForLlm(listingsHtml);
+        const extracted = await extractHackathons(cleanText, 'https://www.hackerearth.com/challenges/hackathon/');
+        
+        for (let h of extracted) {
+          h.source = 'hackerearth';
+          h.isKeralaRelevant = checkKeralaRelevance(h);
+          hackathons.push(h);
+        }
+      }
+      
+      // Try to go to next page
+      const nextBtn = await page.$('.pagination .next, .pagination-next');
+      if (nextBtn) {
+        const isDisabled = await page.evaluate(el => el.classList.contains('disabled'), nextBtn);
+        if (isDisabled) {
+          hasNext = false;
+        } else {
+          await nextBtn.click();
+          pageNum++;
+        }
+      } else {
+        hasNext = false; // No pagination found
       }
     }
   } catch (error) {

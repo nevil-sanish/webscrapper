@@ -10,13 +10,16 @@ const { normalizeName, normalizeDate } = require('./normalize');
 async function deduplicateAndUpsert(newHackathons, HackathonModel) {
   const results = { inserted: [], updated: [] };
   
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 7);
+
   // Fetch existing future or recent hackathons to compare against to avoid loading whole DB
-  const threeDaysAgo = new Date();
-  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-  
-  // We fetch mostly recent ones to dedup, but let's fetch all for safety if DB is small.
-  // In production, limit this query to e.g. startDate >= today - some margin
-  const existingDocs = await HackathonModel.find({});
+  const existingDocs = await HackathonModel.find({
+    $or: [
+      { startDate: { $gte: cutoffDate } },
+      { startDate: null }
+    ]
+  });
 
   for (let h of newHackathons) {
     if (!h.name) continue;
