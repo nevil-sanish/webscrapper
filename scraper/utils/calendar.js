@@ -1,8 +1,8 @@
 const { google } = require('googleapis');
 require('dotenv').config();
 
-const CLIENT_ID = process.env.GOOGLE_CALENDAR_CLIENT_ID;
-const CLIENT_SECRET = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+const CLIENT_ID = process.env.GOOGLE_CALENDAR_CLIENT_ID || process.env.GOOGLE_SEARCH_CLIENT_ID;
+const CLIENT_SECRET = process.env.GOOGLE_CALENDAR_CLIENT_SECRET || process.env.GOOGLE_SEARCH_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
