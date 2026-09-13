@@ -1,6 +1,8 @@
 name: Hack Scrapper
 
 on:
+  push:
+    branches: [ main ]
   schedule:
     # Runs at 06:00 UTC every 2 days
     - cron: '0 6 */2 * *'
