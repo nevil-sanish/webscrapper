@@ -6,9 +6,9 @@ const CLIENT_SECRET = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
-let calendar;
+let calendar = null;
 
-if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN) {
+if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
   const oauth2Client = new google.auth.OAuth2(
     CLIENT_ID,
     CLIENT_SECRET
@@ -19,8 +19,10 @@ if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN) {
   });
 
   calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-} else {
-  console.warn("Google Calendar credentials not fully configured in .env. Calendar integration is disabled.");
+}
+
+function isCalendarConfigured() {
+  return Boolean(calendar);
 }
 
 /**
@@ -30,8 +32,7 @@ if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN) {
  */
 async function addEventToCalendar(hackathon) {
   if (!calendar) {
-    // If calendar is not configured, treat as new so it can still be reported via email
-    return true;
+    return false;
   }
 
   if (!hackathon.name || !hackathon.startDate) {
@@ -93,4 +94,4 @@ async function addEventToCalendar(hackathon) {
   }
 }
 
-module.exports = { addEventToCalendar };
+module.exports = { addEventToCalendar, isCalendarConfigured };

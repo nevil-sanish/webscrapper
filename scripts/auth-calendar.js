@@ -35,7 +35,7 @@ async function authenticate() {
     // Generate the url that will be used for authorization
     const authorizeUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      prompt: 'consent', // Force consent screen to ensure refresh token is returned
+      prompt: 'select_account consent', // Force account chooser + consent screen
       scope: scopes,
     });
 
@@ -69,8 +69,25 @@ async function authenticate() {
 
 authenticate().then((tokens) => {
   console.log('\n=======================================');
-  console.log('SUCCESS! Add this to your .env file:');
-  console.log('=======================================');
-  console.log(`GOOGLE_CALENDAR_REFRESH_TOKEN=${tokens.refresh_token}`);
+  console.log('SUCCESS! Google Calendar Refresh Token obtained:');
+  console.log(tokens.refresh_token);
   console.log('=======================================\n');
+
+  if (tokens.refresh_token) {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.join(__dirname, '../.env');
+    if (fs.existsSync(envPath)) {
+      let envContent = fs.readFileSync(envPath, 'utf8');
+      if (envContent.includes('GOOGLE_CALENDAR_REFRESH_TOKEN=')) {
+        envContent = envContent.replace(/GOOGLE_CALENDAR_REFRESH_TOKEN=.*/g, `GOOGLE_CALENDAR_REFRESH_TOKEN="${tokens.refresh_token}"`);
+      } else {
+        envContent += `\nGOOGLE_CALENDAR_REFRESH_TOKEN="${tokens.refresh_token}"\n`;
+      }
+      fs.writeFileSync(envPath, envContent, 'utf8');
+      console.log('Successfully saved GOOGLE_CALENDAR_REFRESH_TOKEN to .env file!\n');
+    }
+  } else {
+    console.warn('Notice: Google did not return a new refresh token. If you previously authorized this app, go to your Google Account security permissions, revoke access to this app, and run this script again with prompt=consent.');
+  }
 }).catch(console.error);

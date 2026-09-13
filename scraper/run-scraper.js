@@ -9,7 +9,7 @@ const { discoverViaSearch } = require('./search/serpApiSearch');
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
 const { sendEmailReport } = require('../email/sendReport');
-const { addEventToCalendar } = require('./utils/calendar');
+const { addEventToCalendar, isCalendarConfigured } = require('./utils/calendar');
 
 async function run() {
   console.log('Starting Hack Scrapper Run...');
@@ -40,22 +40,29 @@ async function run() {
     const uniqueHackathons = deduplicateHackathons(allNewHackathons);
     console.log(`Found ${uniqueHackathons.length} unique hackathons.`);
 
-    // Add unique hackathons to Google Calendar (skips duplicates in Calendar)
-    const newlyAdded = [];
-    for (let h of uniqueHackathons) {
-      const added = await addEventToCalendar(h);
-      if (added) {
-        newlyAdded.push(h);
+    if (isCalendarConfigured()) {
+      console.log('Syncing hackathons with Google Calendar...');
+      const newlyAdded = [];
+      for (let h of uniqueHackathons) {
+        const added = await addEventToCalendar(h);
+        if (added) {
+          newlyAdded.push(h);
+        }
       }
-    }
 
-    console.log(`Successfully added ${newlyAdded.length} new hackathons to Google Calendar.`);
+      console.log(`Successfully added ${newlyAdded.length} new hackathons to Google Calendar.`);
 
-    // Send email report with the newly added hackathons
-    if (newlyAdded.length > 0) {
-      await sendEmailReport(newlyAdded);
+      if (newlyAdded.length > 0) {
+        await sendEmailReport(newlyAdded);
+      } else {
+        console.log('All discovered hackathons already exist in Google Calendar. No new email sent.');
+      }
     } else {
-      console.log('All discovered hackathons already exist in Google Calendar. No new email sent.');
+      console.warn('\n⚠️  GOOGLE CALENDAR IS NOT CONFIGURED');
+      console.warn('GOOGLE_CALENDAR_REFRESH_TOKEN is empty in your .env file.');
+      console.warn('Run `node scripts/auth-calendar.js` to authorize your Google Calendar.\n');
+      // Still send email with all discovered unique hackathons
+      await sendEmailReport(uniqueHackathons);
     }
   } else {
     console.log('No hackathons found during this run.');
