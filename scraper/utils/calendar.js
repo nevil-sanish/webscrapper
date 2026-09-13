@@ -61,6 +61,109 @@ async function getExistingCalendarEventsMap() {
   return cachedCalendarEventsMap;
 }
 
+
+const SOUTH_INDIA_TERMS = [
+  // States & UTs
+  'kerala', 'tamil nadu', 'tamilnadu', 'karnataka', 'telangana', 'andhra pradesh', 'andhra', 'puducherry', 'pondicherry',
+  // Kerala cities & places
+  'kochi', 'cochin', 'ernakulam', 'trivandrum', 'thiruvananthapuram', 'kozhikode', 'calicut', 'thrissur', 'trichur',
+  'kollam', 'quilon', 'kottayam', 'palakkad', 'palghat', 'kannur', 'cannanore', 'malappuram', 'alappuzha', 'alleppey',
+  'kasaragod', 'wayanad', 'idukki', 'pathanamthitta', 'karunagappally', 'kothamangalam', 'nilambur', 'nalanchira', 'thodiyoor',
+  // Tamil Nadu cities & places
+  'chennai', 'madras', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
+  'erode', 'vellore', 'thanjavur', 'dindigul', 'tiruppur', 'tirupur', 'kanchipuram', 'kancheepuram', 'karur', 'nagercoil',
+  'hosur', 'theni', 'sivakasi', 'virudhunagar', 'kattankulathur', 'cuddalore', 'kumbakonam', 'pollachi',
+  // Karnataka cities & places
+  'bengaluru', 'bangalore', 'mysuru', 'mysore', 'mangaluru', 'mangalore', 'hubballi', 'hubli', 'belagavi',
+  'belgaum', 'udupi', 'shivamogga', 'shimoga', 'davanagere', 'ballari', 'bellary', 'gulbarga',
+  'kalaburagi', 'tumkur', 'tumakuru', 'dharwad', 'bidar', 'hassan',
+  // Telangana cities & places
+  'hyderabad', 'secunderabad', 'warangal', 'nizamabad', 'karimnagar', 'khammam', 'ramagundam', 'mahbubnagar', 'nalgonda',
+  // Andhra Pradesh cities & places
+  'visakhapatnam', 'vizag', 'vijayawada', 'guntur', 'nellore', 'kurnool', 'rajahmundry', 'tirupati',
+  'kakinada', 'anantapur', 'ananthapur', 'kadapa', 'chittoor', 'amaravati', 'nuzvid', 'srikakulam', 'eluru', 'ongole'
+];
+
+const NON_SOUTH_TERMS = [
+  'delhi', 'new delhi', 'noida', 'gurugram', 'gurgaon', 'mumbai', 'navi mumbai', 'pune', 'nagpur', 'nashik', 'sangli',
+  'maharashtra', 'rajasthan', 'jaipur', 'udaipur', 'jodhpur', 'kota',
+  'uttar pradesh', 'lucknow', 'kanpur', 'mathura', 'varanasi', 'ghaziabad', 'meerut', 'agra',
+  'madhya pradesh', 'indore', 'bhopal', 'gwalior', 'jabalpur',
+  'punjab', 'mohali', 'ludhiana', 'amritsar', 'chandigarh',
+  'haryana', 'sonipat', 'panipat', 'rohtak',
+  'west bengal', 'kolkata', 'howrah', 'panihati',
+  'bihar', 'patna', 'araria', 'sheikhpura',
+  'gujarat', 'ahmedabad', 'surat', 'vadodara', 'gandhinagar',
+  'odisha', 'orissa', 'bhubaneswar', 'rourkela',
+  'chhattisgarh', 'raipur', 'bhilai', 'junwani',
+  'jharkhand', 'ranchi', 'jamshedpur',
+  'uttarakhand', 'dehradun', 'roorkee', 'pantnagar',
+  'himachal pradesh', 'manali', 'shimla', 'hamirpur',
+  'goa', 'assam', 'guwahati',
+  'germany', 'munich', 'usa', 'seattle', 'redmond', 'washington'
+];
+
+/**
+ * Checks whether an event location/description/name is located in South India
+ */
+function isSouthIndia(location, description, name) {
+  const loc = (location || '').toLowerCase().trim();
+
+  // If location has South India terms and no non-South state/city terms
+  const locHasSouth = SOUTH_INDIA_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(loc));
+  const locHasNonSouth = NON_SOUTH_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(loc));
+
+  if (locHasSouth && !locHasNonSouth) return true;
+  if (locHasNonSouth) return false;
+
+  // Fallback to name and description
+  const combined = `${name || ''} ${description || ''}`.toLowerCase();
+  const textHasSouth = SOUTH_INDIA_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(combined));
+  const textHasNonSouth = NON_SOUTH_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(combined));
+
+  if (textHasSouth && !textHasNonSouth) return true;
+  return false;
+}
+
+/**
+ * Determines Google Calendar colorId based on:
+ * - Online all -> Green ('10' Basil)
+ * - Offline in South India -> Orange ('6' Tangerine)
+ * - Offline other -> Purple ('3' Grape)
+ */
+function getEventColorId(hackathon) {
+  const mode = (hackathon.mode || '').toLowerCase().trim();
+  const loc = (hackathon.location || '').toLowerCase().trim();
+
+  const isExplicitOnline = mode === 'online' || mode === 'virtual';
+  const hasNoPhysicalLoc = !loc || loc === 'online' || loc === 'virtual' || loc === 'remote';
+
+  // Pure online event
+  if (isExplicitOnline && hasNoPhysicalLoc) {
+    return '10'; // Basil (Green)
+  }
+
+  if (hasNoPhysicalLoc && !mode.includes('offline') && !mode.includes('in-person') && !mode.includes('both') && !mode.includes('hybrid')) {
+    return '10'; // Basil (Green)
+  }
+
+  // Offline or hybrid/both event
+  if (isSouthIndia(hackathon.location, hackathon.description, hackathon.name)) {
+    return '6'; // Tangerine (Orange)
+  }
+
+  return '3'; // Grape (Purple)
+}
+
+function getColorName(colorId) {
+  switch (colorId) {
+    case '10': return 'Green';
+    case '6': return 'Orange';
+    case '3': return 'Purple';
+    default: return colorId;
+  }
+}
+
 /**
  * Creates or updates a single-day calendar event for a hackathon on its registration deadline / start date.
  * @param {Object} hackathon - The hackathon object
@@ -118,18 +221,12 @@ async function addEventToCalendar(hackathon) {
   nextDay.setDate(nextDay.getDate() + 1);
   const nextDayStr = formatYMD(nextDay);
 
-  // Determine Google Calendar Color:
-  // - Offline and Both (online & offline) -> Peacock color ("7")
-  // - Online -> Orange color ("6")
-  let colorId = '6'; // Tangerine / Orange (default for online)
-  const mode = (hackathon.mode || '').toLowerCase().trim();
-  const loc = (hackathon.location || '').toLowerCase().trim();
-
-  if (mode === 'offline' || mode === 'both' || mode === 'hybrid' || mode === 'in-person' || mode === 'physical') {
-    colorId = '7'; // Peacock
-  } else if (loc && loc !== 'online' && !loc.includes('online') && loc !== 'virtual') {
-    colorId = '7'; // Peacock
-  }
+  // Determine Google Calendar Color based on criteria:
+  // - Online all -> Green ('10')
+  // - Offline South India -> Orange ('6')
+  // - Offline Other -> Purple ('3')
+  const colorId = getEventColorId(hackathon);
+  const colorName = getColorName(colorId);
 
   // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
@@ -154,7 +251,7 @@ async function addEventToCalendar(hackathon) {
       return false;
     }
 
-    // Otherwise, patch and update the event to the correct registration date
+    // Otherwise, patch and update the event to the correct registration date and color
     try {
       await calendar.events.patch({
         calendarId: CALENDAR_ID,
@@ -167,7 +264,7 @@ async function addEventToCalendar(hackathon) {
           location: hackathon.location || 'Online'
         }
       });
-      console.log(`Updated Google Calendar event "${hackathon.name}" to correct registration date ${startDateStr} (color: ${colorId === '7' ? 'Peacock' : 'Orange'})`);
+      console.log(`Updated Google Calendar event "${hackathon.name}" (date: ${startDateStr}, color: ${colorName})`);
       existing.start = { date: startDateStr };
       existing.colorId = colorId;
       return true;
@@ -195,7 +292,7 @@ async function addEventToCalendar(hackathon) {
       calendarId: CALENDAR_ID,
       resource: event,
     });
-    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr} (color: ${colorId === '7' ? 'Peacock' : 'Orange'}): ${res.data.htmlLink}`);
+    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr} (color: ${colorName}): ${res.data.htmlLink}`);
     existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, colorId });
     return true;
   } catch (error) {
@@ -204,4 +301,10 @@ async function addEventToCalendar(hackathon) {
   }
 }
 
-module.exports = { addEventToCalendar, isCalendarConfigured };
+module.exports = {
+  addEventToCalendar,
+  isCalendarConfigured,
+  isSouthIndia,
+  getEventColorId,
+  getColorName
+};
