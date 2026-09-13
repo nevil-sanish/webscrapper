@@ -3,35 +3,37 @@ const { checkKeralaRelevance } = require('../utils/normalize');
 const { parseDateToYMD } = require('../utils/pageParser');
 
 /**
- * Scrapes Unstop hackathons across pagination pages and visits each
- * hackathon's exact competition page/details to extract:
- * 1. name
- * 2. place (location)
- * 3. mode (online, offline, both)
- * 4. registration end date (from the registration closing time interval)
+ * Scrapes Unstop hackathons across all pagination pages for:
+ * https://unstop.com/hackathons?oppstatus=open&usertype=students
  * 
- * Completely deterministic without any LLM API calls.
+ * For each hackathon, visits its exact page/details to extract:
+ * 1. Name (from center part)
+ * 2. Mode (from center part: offline, online, both)
+ * 3. Place / Location (from center part)
+ * 4. Days Left & Registration Deadline (from top right card & live rounds)
+ * 5. Registration Fee (from top right card: e.g. ₹ 1,500 or Free)
  */
 async function scrapeUnstop() {
-  console.log('Scraping Unstop (Multi-page search + exact hackathon page extraction)...');
+  console.log('Scraping Unstop (https://unstop.com/hackathons?oppstatus=open&usertype=students)...');
   const hackathons = [];
   
   try {
     let page = 1;
     let hasMore = true;
-    const maxPages = 6;
+    const maxPages = 15;
     const opportunityIds = [];
     
-    // Step 1: Discover hackathons across search pages
+    // Step 1: Discover hackathons across search pages 1, 2, 3...
     while (hasMore && page <= maxPages) {
       console.log(`Fetching Unstop search page ${page}...`);
-      const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open&usertype=students&domain=2`;
+      const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open&usertype=students`;
       
       const res = await axios.get(searchUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json'
         },
+        family: 4,
         timeout: 10000
       });
       
@@ -50,15 +52,16 @@ async function scrapeUnstop() {
         }
       }
       
-      if (items.length < 15) {
+      const lastPage = res.data?.data?.last_page || 11;
+      if (page >= lastPage || items.length === 0) {
         hasMore = false;
       } else {
         page++;
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 100));
       }
     }
     
-    console.log(`Found ${opportunityIds.length} Unstop hackathons. Visiting exact pages...`);
+    console.log(`Found ${opportunityIds.length} open Unstop hackathons across pages. Visiting each exact page...`);
     
     const now = new Date();
     const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -71,16 +74,23 @@ async function scrapeUnstop() {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json'
           },
-          timeout: 8000
+          family: 4,
+          timeout: 10000
         });
         
         const comp = detailRes.data?.data?.competition;
         if (!comp || !comp.title) continue;
 
-        // Extract Registration / Submission Closing Date:
-        // 1. Primary: If a LIVE round (e.g. Idea Submission, Screening, Round 1) is active,
-        // its end_date is the immediate deadline participants are racing against (e.g. Tejas ends 13 Sep)
+        // 1. Name
+        const name = comp.title;
+
+        // 2. Days Left & Registration Closing Date
+        const remainDaysText = comp.regnRequirements?.remain_days ||
+          (comp.regnRequirements?.remainingDaysArray ? `${comp.regnRequirements.remainingDaysArray.durations} ${comp.regnRequirements.remainingDaysArray.text}` : null);
+
         let regClosingDate = null;
+
+        // If a LIVE round (Idea Submission, Screening, Round 1) is active, its end_date is the real deadline
         if (Array.isArray(comp.rounds)) {
           for (let r of comp.rounds) {
             if (Array.isArray(r.details)) {
@@ -96,12 +106,12 @@ async function scrapeUnstop() {
           }
         }
 
-        // 2. Secondary: Registration interval from regnRequirements (start_regn_dt -> end_regn_dt)
+        // Secondary: regnRequirements.start_regn_dt -> end_regn_dt
         if (!regClosingDate && comp.regnRequirements?.end_regn_dt) {
           regClosingDate = parseDateToYMD(comp.regnRequirements.end_regn_dt);
         }
 
-        // 3. Tertiary: Check any rounds with registration / submission titles
+        // Tertiary: Check rounds with registration / submission titles
         if (!regClosingDate && Array.isArray(comp.rounds)) {
           for (let r of comp.rounds) {
             if (Array.isArray(r.details)) {
@@ -118,7 +128,7 @@ async function scrapeUnstop() {
           }
         }
 
-        // 3. Fallback: datesToshow items
+        // Fallback: datesToshow items
         if (!regClosingDate && Array.isArray(comp.datesToshow)) {
           const regItem = comp.datesToshow.find(d => /registration|regn|apply|round 1/i.test(d.title));
           if (regItem?.important_date) {
@@ -126,7 +136,7 @@ async function scrapeUnstop() {
           }
         }
 
-        // 4. Ultimate fallback: comp.regn_end_date or comp.end_date
+        // Ultimate fallback
         if (!regClosingDate) {
           regClosingDate = parseDateToYMD(comp.regn_end_date || comp.end_date);
         }
@@ -135,11 +145,10 @@ async function scrapeUnstop() {
 
         // Filter: only events whose registration deadline is today or in the future
         if (regClosingDate < todayYMD) {
-          // Registration closed in the past, skip
           continue;
         }
 
-        // Extract Place & Mode
+        // 3. Place / Location
         const address = comp.address_with_country_logo;
         let location = 'Online';
         let mode = 'online';
@@ -151,10 +160,25 @@ async function scrapeUnstop() {
 
         if (isBoth) {
           mode = 'both';
-          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : 'Hybrid';
+          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : (comp.location || 'Hybrid');
         } else if (isOffline) {
           mode = 'offline';
           location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : (comp.location || 'In-person');
+        }
+
+        // 4. Registration Fee (from top right card)
+        let fee = 'Free';
+        if (Array.isArray(comp.payment_services)) {
+          const paidService = comp.payment_services.find(p => p.amount && p.amount > 0);
+          if (paidService) {
+            fee = `₹${paidService.amount}`;
+          }
+        }
+        if (fee === 'Free' && comp.details) {
+          const feeMatch = comp.details.match(/registration fee[s]?\s*[:\-–]?\s*([₹Rs\.]*\s*[\d,]+)/i);
+          if (feeMatch) {
+            fee = feeMatch[1].trim();
+          }
         }
         
         let sourceUrl = `https://unstop.com/hackathons/${opp.id}`;
@@ -165,12 +189,14 @@ async function scrapeUnstop() {
         }
           
         const h = {
-          name: comp.title,
+          name: name,
           startDate: regClosingDate,
           endDate: parseDateToYMD(comp.end_date) || regClosingDate,
           registrationDeadline: regClosingDate,
           location: location,
           mode: mode,
+          fee: fee,
+          daysLeft: remainDaysText,
           organizer: comp.organization?.name || null,
           prize: comp.overall_prizes || null,
           eligibility: null,
@@ -187,7 +213,7 @@ async function scrapeUnstop() {
       }
       
       // Respectful pause between API calls
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 60));
     }
     
   } catch (error) {

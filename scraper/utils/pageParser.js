@@ -318,6 +318,12 @@ function parseExactHackathonPage(html, pageUrl) {
     return null;
   }
 
+  let fee = 'Free';
+  const feeMatch = bodyText.match(/(?:registration fee[s]?|entry fee|participation fee|ticket price)\s*[:\-–]?\s*([₹Rs\.]*\s*[\d,]+)/i);
+  if (feeMatch) {
+    fee = feeMatch[1].trim();
+  }
+
   const desc = $('meta[property="og:description"]').attr('content') ||
                $('meta[name="description"]').attr('content') ||
                $('p').first().text().trim().slice(0, 300);
@@ -326,6 +332,7 @@ function parseExactHackathonPage(html, pageUrl) {
     name: name,
     place: place,
     mode: mode,
+    fee: fee,
     registrationDeadline: registrationEndDate,
     startDate: registrationEndDate,
     description: desc || null,

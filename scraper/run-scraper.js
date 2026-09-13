@@ -3,7 +3,6 @@ require('dotenv').config();
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
-const { scrapeHackerEarth } = require('./sites/hackerearth');
 const { discoverViaSearch } = require('./search/serpApiSearch');
 
 // Utils
@@ -15,19 +14,15 @@ async function run() {
 
   let allNewHackathons = [];
 
-  // 1. Scrape Devfolio
+  // 1. Scrape Devfolio (https://devfolio.co/hackathons)
   const devfolioData = await scrapeDevfolio();
   allNewHackathons = allNewHackathons.concat(devfolioData);
 
-  // 2. Scrape Unstop
+  // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open&usertype=students)
   const unstopData = await scrapeUnstop();
   allNewHackathons = allNewHackathons.concat(unstopData);
 
-  // 3. Scrape HackerEarth
-  const heData = await scrapeHackerEarth();
-  allNewHackathons = allNewHackathons.concat(heData);
-
-  // 4. Google Search Discovery
+  // 3. Google Search Discovery (top 5 websites per query)
   const searchData = await discoverViaSearch();
   allNewHackathons = allNewHackathons.concat(searchData);
 

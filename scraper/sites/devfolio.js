@@ -35,6 +35,7 @@ async function scrapeDevfolio() {
           'Content-Type': 'application/json',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
         },
+        family: 4,
         timeout: 10000
       });
 
@@ -79,6 +80,7 @@ async function scrapeDevfolio() {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
           },
+          family: 4,
           timeout: 10000
         });
 
@@ -102,60 +104,77 @@ async function scrapeDevfolio() {
         name = name.replace(/\s*\|\s*Devfolio.*/i, '').trim();
 
         // 2. Place
-        let place = 'Online';
+        let place = nextData?.location ||
+                    [nextData?.city, nextData?.state, nextData?.country].filter(Boolean).join(', ') ||
+                    item.initialHit?.location;
         const bodyText = $('body').text();
         const happeningMatch = bodyText.match(/HAPPENING\s*\n+([^\n]+)/i);
         if (happeningMatch && !/online/i.test(happeningMatch[1])) {
           place = happeningMatch[1].trim();
-        } else if (nextData?.location) {
-          place = nextData.location;
-        } else if (nextData?.city) {
-          place = [nextData.city, nextData.state, nextData.country].filter(Boolean).join(', ');
-        } else if (item.initialHit?.location) {
-          place = item.initialHit.location;
+        }
+        if (!place) {
+          place = (nextData?.is_online || item.initialHit?.is_online) ? 'Online' : 'In-person';
         }
 
         // 3. Mode
         let mode = 'online';
-        const isOnlineSetting = nextData ? nextData.is_online : item.initialHit.is_online;
+        const isOnlineSetting = nextData ? nextData.is_online : item.initialHit?.is_online;
+        const isHybridSetting = nextData?.settings?.is_hybrid || false;
         const hasPhysicalPlace = place && place.toLowerCase() !== 'online' && !place.toLowerCase().includes('virtual');
 
-        if (isOnlineSetting === false) {
+        if (isHybridSetting) {
+          mode = 'both';
+        } else if (isOnlineSetting === false) {
           mode = 'offline';
         } else if (hasPhysicalPlace) {
           mode = isOnlineSetting ? 'both' : 'offline';
         }
 
-        // 4. Registration End Date (Countdown timer)
-        let regEndDate = null;
+        // 4. Registration End Date & Countdown Timer (Applications close in)
+        const timerTimestamp = nextData?.settings?.reg_ends_at ||
+                               nextData?.hackathon_setting?.reg_ends_at ||
+                               nextData?.reg_ends_at ||
+                               item.initialHit?.hackathon_setting?.reg_ends_at ||
+                               item.initialHit?.reg_ends_at;
 
-        // A. Parse backwards timer from text (e.g., "1d:15h:59m", "11d 4h left", "closes in 3 days")
-        const timerMatch = bodyText.match(/(?:APPLICATIONS CLOSE IN|Closes in|close in|ends in)\s*\n*([^\n]+)/i);
-        if (timerMatch) {
-          regEndDate = parseCountdownToDate(timerMatch[1]);
-        }
-        if (!regEndDate) {
-          const daysLeftMatch = bodyText.match(/(\d+)\s*d(?:ays?)?\s*(?:\d+\s*h(?:ours?)?)?\s*left/i);
-          if (daysLeftMatch) {
-            regEndDate = parseCountdownToDate(daysLeftMatch[0]);
+        let regEndDate = timerTimestamp ? parseDateToYMD(timerTimestamp) : null;
+
+        // Days left string calculation
+        let daysLeftStr = null;
+        if (timerTimestamp) {
+          const diffMs = new Date(timerTimestamp).getTime() - Date.now();
+          if (diffMs > 0) {
+            const d = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            const h = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            daysLeftStr = `${d}d:${h}h:${m}m (${d} days left)`;
           }
         }
 
-        // B. Target timestamp of the timer from exact page settings
+        // Fallback: search body text for countdown patterns if timestamp not found
         if (!regEndDate) {
-          const timerTimestamp = nextData?.settings?.reg_ends_at ||
-                                 nextData?.hackathon_setting?.reg_ends_at ||
-                                 nextData?.reg_ends_at ||
-                                 item.initialHit?.hackathon_setting?.reg_ends_at ||
-                                 item.initialHit?.reg_ends_at;
-          if (timerTimestamp) {
-            regEndDate = parseDateToYMD(timerTimestamp);
+          const timerTextMatch = bodyText.match(/APPLICATIONS CLOSE IN\s*([0-9dhm:\s]+)/i) ||
+                                 bodyText.match(/(\d+\s*d(?:ays?)?\s*(?:\d+\s*h(?:ours?)?)?\s*left)/i);
+          if (timerTextMatch) {
+            regEndDate = parseCountdownToDate(timerTextMatch[1]);
+            daysLeftStr = timerTextMatch[1].trim();
           }
         }
 
         // Filter: Must have a valid registration closing date that is today or in the future
         if (!regEndDate || regEndDate < todayYMD) {
           continue;
+        }
+
+        // 5. Fee
+        let fee = 'Free';
+        if (nextData?.settings?.paid) {
+          fee = nextData?.settings?.fee_amount ? `₹${nextData.settings.fee_amount}` : 'Paid';
+        } else {
+          const feeMatch = bodyText.match(/(?:registration (?:cost|fee)[s]?|participation fee|entry fee)\s*[:\-–]?\s*([₹Rs\.]*\s*[\d,]+)/i);
+          if (feeMatch) {
+            fee = feeMatch[1].trim();
+          }
         }
 
         const prizes = Array.isArray(nextData?.prizes || item.initialHit?.prizes) && (nextData?.prizes || item.initialHit?.prizes).length > 0
@@ -170,6 +189,8 @@ async function scrapeDevfolio() {
           eventConductedDate: nextData?.starts_at || item.initialHit?.starts_at || null,
           location: place,
           mode: mode,
+          fee: fee,
+          daysLeft: daysLeftStr,
           organizer: nextData?.tagline || item.initialHit?.tagline || null,
           prize: prizes,
           eligibility: null,

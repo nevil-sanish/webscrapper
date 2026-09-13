@@ -63,7 +63,8 @@ async function discoverViaSearch() {
           gl: 'in',
           hl: 'en'
         },
-        timeout: 8000
+        family: 4,
+        timeout: 10000
       });
 
       const organic = res.data?.organic_results || [];
@@ -137,6 +138,7 @@ async function discoverViaSearch() {
             registrationDeadline: parsed.registrationDeadline,
             location: parsed.place,
             mode: parsed.mode,
+            fee: parsed.fee || 'Free',
             organizer: null,
             prize: null,
             eligibility: null,

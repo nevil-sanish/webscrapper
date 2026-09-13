@@ -50,7 +50,8 @@ async function getExistingCalendarEventsMap() {
           summary: item.summary,
           start: item.start,
           end: item.end,
-          colorId: item.colorId
+          colorId: item.colorId,
+          description: item.description || ''
         });
       }
     }
@@ -230,7 +231,10 @@ async function addEventToCalendar(hackathon) {
 
   // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
+  desc += `Location: ${hackathon.location || 'Online'}\n`;
   desc += `Link: ${hackathon.sourceUrl}\n`;
+  if (hackathon.fee) desc += `Registration Fee: ${hackathon.fee}\n`;
+  if (hackathon.daysLeft) desc += `Days Left: ${hackathon.daysLeft}\n`;
   if (hackathon.registrationDeadline) desc += `Registration Deadline: ${new Date(hackathon.registrationDeadline).toLocaleDateString()}\n`;
   if (hackathon.startDate) desc += `Event Date / Deadline: ${new Date(hackathon.startDate).toLocaleDateString()}\n`;
   if (hackathon.endDate) desc += `End Date: ${new Date(hackathon.endDate).toLocaleDateString()}\n`;
@@ -246,12 +250,13 @@ async function addEventToCalendar(hackathon) {
 
   if (existing) {
     const existingDate = (existing.start?.date || existing.start?.dateTime || '').slice(0, 10);
-    // If the event already exists with the exact same date and color, skip as duplicate
-    if (existingDate === startDateStr && existing.colorId === colorId) {
+    const existingDesc = (existing.description || '').trim();
+    // If the event already exists with the exact same date, color, and description, skip as duplicate
+    if (existingDate === startDateStr && existing.colorId === colorId && existingDesc === desc.trim()) {
       return false;
     }
 
-    // Otherwise, patch and update the event to the correct registration date and color
+    // Otherwise, patch and update the event to the correct registration date, color, and description
     try {
       await calendar.events.patch({
         calendarId: CALENDAR_ID,
@@ -267,6 +272,7 @@ async function addEventToCalendar(hackathon) {
       console.log(`Updated Google Calendar event "${hackathon.name}" (date: ${startDateStr}, color: ${colorName})`);
       existing.start = { date: startDateStr };
       existing.colorId = colorId;
+      existing.description = desc;
       return true;
     } catch (err) {
       console.error(`Error updating calendar event for "${hackathon.name}":`, err.message);
