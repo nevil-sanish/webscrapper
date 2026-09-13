@@ -51,7 +51,7 @@ async function sendEmailReport(inserted) {
   htmlContent += `</table><br><p>⭐ indicates potentially relevant to Kerala students.</p>`;
 
   const mailOptions = {
-    from: `"Hackathon Aggregator" <${process.env.SMTP_USER}>`,
+    from: `"Hack Scrapper" <${process.env.SMTP_USER}>`,
     to: emailTo,
     subject: `New Hackathons Found! (${inserted.length})`,
     html: htmlContent,

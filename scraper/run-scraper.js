@@ -16,7 +16,7 @@ const connectDB = require('../server/config/db');
 const { sendEmailReport } = require('../email/sendReport');
 
 async function run() {
-  console.log('Starting Hackathon Aggregator Run...');
+  console.log('Starting Hack Scrapper Run...');
   
   try {
     await connectDB();
