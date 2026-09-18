@@ -14,3 +14,6 @@ client/dist/
 
 # Local state
 scraper/search/searchState.json
+
+scraper/search/discoveryState.json*
+scraper/search/discoveryReport.json

@@ -1,3 +1,4 @@
+const { isHackathon } = require('../utils/hackathonType');
 const { classifyAttendance, contentText } = require('../utils/eventPolicy');
 const axios = require('axios');
 const { parseDateToYMD } = require('../utils/pageParser');
@@ -86,6 +87,7 @@ async function scrapeUnstop() {
 
         // 1. Name
         const name = comp.title;
+        if (!isHackathon({ name }, `${comp.details || ''} ${contentText(comp.rounds)}`)) continue;
 
         // 2. Days Left & Registration Closing Date
         const remainDaysText = comp.regnRequirements?.remain_days ||

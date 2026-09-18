@@ -133,7 +133,7 @@ function parseCountdownToDate(text) {
  * @param {string} pageUrl - The URL of the exact hackathon page
  * @returns {Object|null} - { name, place, mode, registrationDeadline, description, sourceUrl }
  */
-function parseExactHackathonPage(html, pageUrl) {
+function parseExactHackathonPage(html, pageUrl, options = {}) {
   if (!html || typeof html !== 'string') return null;
 
   const $ = cheerio.load(html);
@@ -173,8 +173,8 @@ function parseExactHackathonPage(html, pageUrl) {
   if (!name) {
     name = $('meta[property="og:title"]').attr('content') ||
            $('meta[name="twitter:title"]').attr('content') ||
-           $('h1').first().text().trim() ||
-           $('title').text().trim();
+           $('title').text().trim() ||
+           $('h1').first().text().trim();
   }
   // Clean title suffixes like "| Devpost", "| Devfolio", "- Unstop"
   name = name.replace(/\s*([|–—-])\s*(Devfolio|Devpost|Unstop|HackerEarth|Eventopia|Dare2Compete).*$/i, '').trim();
@@ -236,6 +236,17 @@ function parseExactHackathonPage(html, pageUrl) {
     }
   }
 
+  // Resolve abbreviated venue cards using another mention of the same institution.
+  // Do not borrow an unrelated organizer's state from elsewhere on the page.
+  if (place) {
+    const institution = place.split(',')[0].toLowerCase().trim();
+    if (institution.length > 12) {
+      const fuller = bodyText.split('\n').find(line =>
+        line.toLowerCase().includes(institution) && /\b(kerala|thrissur|kochi|kannur|kottayam|chennai|karnataka|tamil nadu)\b/i.test(line));
+      if (fuller) place = fuller.trim();
+    }
+  }
+
   // ----------------------------------------------------
   // 4. Extract Registration End Date (Deadline)
   // ----------------------------------------------------
@@ -263,7 +274,7 @@ function parseExactHackathonPage(html, pageUrl) {
 
   // C. Check explicit date labels in page text
   if (!registrationEndDate) {
-    const deadlineTextMatch = bodyText.match(/(?:registration deadline|last date to register|register by|application deadline|registration closes on|registration ends on|submissions close on|deadline)\s*[:\-–]\s*([A-Za-z0-9\s,./-]{4,35})/i);
+    const deadlineTextMatch = bodyText.match(/(?:registration deadline|last date to register|register by|application deadline|registration closes(?: on)?|registration ends(?: on)?|submissions close(?: on)?|deadline)\s*[:\-–]?\s*([A-Za-z0-9 ,./-]{4,35})/i);
     if (deadlineTextMatch) {
       const candidateDate = parseDateToYMD(deadlineTextMatch[1]);
       if (candidateDate) {
@@ -272,12 +283,30 @@ function parseExactHackathonPage(html, pageUrl) {
     }
   }
 
-  // D. Check JSON-LD offers or registration / startDate
+  // Timeline cards can put "SEP 23" before "REGISTRATION CLOSES".
+  // Infer a missing year only from an explicit event date on this page.
+  if (!registrationEndDate) {
+    const eventYear = String(jsonLdEvent?.startDate || '').match(/20\d{2}/)?.[0] ||
+      bodyText.match(/\b(?:Jan\w*|Feb\w*|Mar\w*|Apr\w*|May|Jun\w*|Jul\w*|Aug\w*|Sep\w*|Oct\w*|Nov\w*|Dec\w*)\s+\d{1,2}(?:\s*[-–,]\s*\d{1,2})*,?\s+(20\d{2})\b/i)?.[1];
+    const lines = bodyText.split('\n').map(x => x.trim()).filter(Boolean);
+    const label = /^(?:registration(?:s)?|applications?)\s+(?:closes?|ends?|deadline|last date)(?:\s+(?:on|at))?\s*[:–-]?$/i;
+    for (let i = 0; i < lines.length; i++) {
+      if (!label.test(lines[i])) continue;
+      for (const candidate of [lines[i - 1], lines[i + 1]]) {
+        if (!candidate || !/^(?:[A-Za-z]+\s+\d{1,2}|\d{1,2}\s+[A-Za-z]+)(?:,?\s+20\d{2})?$/.test(candidate)) continue;
+        const dated = /20\d{2}/.test(candidate) ? candidate : (eventYear ? `${candidate} ${eventYear}` : '');
+        const parsed = parseDateToYMD(dated);
+        if (parsed) { registrationEndDate = parsed; break; }
+      }
+      if (registrationEndDate) break;
+    }
+  }
+
+  // D. Explicit registration validity only; event start is not a registration deadline.
   if (!registrationEndDate && jsonLdEvent) {
     if (jsonLdEvent.offers?.validThrough) {
       registrationEndDate = parseDateToYMD(jsonLdEvent.offers.validThrough);
-    } else if (jsonLdEvent.startDate) {
-      registrationEndDate = parseDateToYMD(jsonLdEvent.startDate);
+
     }
   }
 
@@ -299,12 +328,15 @@ function parseExactHackathonPage(html, pageUrl) {
   }
 
   // Filter: Event must have valid future/today registration end date
-  if (!registrationEndDate) return null;
+  if (!registrationEndDate) {
+    if (options.diagnostics) options.diagnostics.reason = 'missing-registration-deadline';
+    return null;
+  }
 
-  const now = new Date();
+  const now = options.now || new Date();
   const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   if (registrationEndDate < todayYMD) {
-    // Expired registration deadline
+    if (options.diagnostics) options.diagnostics.reason = 'expired-registration-deadline';
     return null;
   }
 
@@ -321,7 +353,7 @@ function parseExactHackathonPage(html, pageUrl) {
   const attendance = classifyAttendance({ name, location: place, mode }, bodyText);
   return {
     name: name,
-    place: attendance.location,
+    place: attendance.location.replace(/\s+/g, ' ').trim(),
     mode: attendance.mode,
     attendanceAnalyzed: true,
     attendanceEvidence: attendance.attendanceEvidence,

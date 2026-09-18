@@ -1,3 +1,6 @@
+const { originalName, calendarSummary, isManaged, isPastEvent, fromCalendar } = require('./calendarPolicy');
+const { shouldKeepHackathon } = require('./eventPolicy');
+const { keralaPriority } = require('./eventPolicy');
 const { google } = require('googleapis');
 require('dotenv').config();
 
@@ -36,25 +39,30 @@ async function getExistingCalendarEventsMap() {
   if (!calendar) return cachedCalendarEventsMap;
 
   try {
-    const res = await calendar.events.list({
-      calendarId: CALENDAR_ID,
-      timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      maxResults: 2500,
-      singleEvents: true,
-    });
+    let pageToken;
+    do {
+      const res = await calendar.events.list({
+        calendarId: CALENDAR_ID,
+        timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        maxResults: 2500,
+        singleEvents: true,
+        pageToken,
+      });
 
-    for (let item of res.data.items || []) {
-      if (item.summary) {
-        cachedCalendarEventsMap.set(item.summary.trim().toLowerCase(), {
-          id: item.id,
-          summary: item.summary,
-          start: item.start,
-          end: item.end,
-          colorId: item.colorId,
-          description: item.description || ''
-        });
+      for (let item of res.data.items || []) {
+        if (item.summary && isManaged(item)) {
+          cachedCalendarEventsMap.set(originalName(item.summary).trim().toLowerCase(), {
+            id: item.id,
+            summary: item.summary,
+            start: item.start,
+            end: item.end,
+            colorId: item.colorId,
+            description: item.description || ''
+          });
+        }
       }
-    }
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
   } catch (error) {
     console.error('Error fetching existing calendar events for deduplication:', error.message);
   }
@@ -128,10 +136,12 @@ function isSouthIndia(location, description, name) {
 
 /**
  * Determines Google Calendar colorId based on:
- * - Online all -> Blue ('9' Blueberry)
+ * - Kerala -> Green ('10' Basil)
+ * - Other online -> Blue ('9' Blueberry)
  * - Offline -> Red ('11' Tomato)
  */
 function getEventColorId(hackathon) {
+  if (keralaPriority(hackathon)) return '10';
   const mode = (hackathon.mode || '').toLowerCase().trim();
   const loc = (hackathon.location || '').toLowerCase().trim();
 
@@ -153,6 +163,7 @@ function getEventColorId(hackathon) {
 
 function getColorName(colorId) {
   switch (colorId) {
+    case '10': return 'Green';
     case '9': return 'Blue';
     case '11': return 'Red';
     default: return colorId;
@@ -216,12 +227,10 @@ async function addEventToCalendar(hackathon) {
   nextDay.setDate(nextDay.getDate() + 1);
   const nextDayStr = formatYMD(nextDay);
 
-  // Determine Google Calendar Color based on criteria:
-  // - Online all -> Green ('10')
-  // - Offline South India -> Orange ('6')
-  // - Offline Other -> Purple ('3')
+  // Kerala green, other online blue, other offline red.
   const colorId = getEventColorId(hackathon);
   const colorName = getColorName(colorId);
+  const summary = calendarSummary(hackathon);
 
   // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
@@ -246,7 +255,7 @@ async function addEventToCalendar(hackathon) {
     const existingDate = (existing.start?.date || existing.start?.dateTime || '').slice(0, 10);
     const existingDesc = (existing.description || '').trim();
     // If the event already exists with the exact same date, color, and description, skip as duplicate
-    if (existingDate === startDateStr && existing.colorId === colorId && existingDesc === desc.trim()) {
+    if (existingDate === startDateStr && existing.colorId === colorId && existingDesc === desc.trim() && existing.summary === summary) {
       return false;
     }
 
@@ -256,6 +265,8 @@ async function addEventToCalendar(hackathon) {
         calendarId: CALENDAR_ID,
         eventId: existing.id,
         resource: {
+          summary,
+          extendedProperties: { private: { managedBy: 'hack-scrapper' } },
           start: { date: startDateStr },
           end: { date: nextDayStr },
           colorId: colorId,
@@ -265,6 +276,7 @@ async function addEventToCalendar(hackathon) {
       });
       console.log(`Updated Google Calendar event "${hackathon.name}" (date: ${startDateStr}, color: ${colorName})`);
       existing.start = { date: startDateStr };
+      existing.summary = summary;
       existing.colorId = colorId;
       existing.description = desc;
       return true;
@@ -275,7 +287,8 @@ async function addEventToCalendar(hackathon) {
   }
 
   const event = {
-    summary: hackathon.name,
+    summary,
+    extendedProperties: { private: { managedBy: 'hack-scrapper' } },
     location: hackathon.location || 'Online',
     description: desc,
     colorId: colorId,
@@ -293,7 +306,7 @@ async function addEventToCalendar(hackathon) {
       resource: event,
     });
     console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr} (color: ${colorName}): ${res.data.htmlLink}`);
-    existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, colorId });
+    existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, colorId, summary, description: desc });
     return true;
   } catch (error) {
     console.error(`Error creating calendar event for "${hackathon.name}":`, error.response?.data?.error?.message || error.message);
@@ -347,7 +360,47 @@ async function clearAllCalendarEvents() {
   }
 }
 
+// Run before scraping, including when no new events are discovered.
+async function maintainCalendar({ now = new Date(), client = calendar, calendarId = CALENDAR_ID } = {}) {
+  if (!client) return { deleted: 0, updated: 0 };
+  const items = [];
+  let pageToken;
+  let timeZone = 'Asia/Kolkata';
+  do {
+    const res = await client.events.list({ calendarId, maxResults: 2500, pageToken, showDeleted: false });
+    items.push(...(res.data.items || []));
+    timeZone = res.data.timeZone || timeZone;
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  let deleted = 0;
+  let updated = 0;
+  for (const item of items) {
+    if (!isManaged(item) || item.recurrence || item.recurringEventId) continue;
+    const h = fromCalendar(item);
+    const reason = isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' : null);
+    try {
+      if (reason) {
+        await client.events.delete({ calendarId, eventId: item.id });
+        deleted++;
+        console.log(`Removed ${reason}: ${h.name}`);
+      } else {
+        const summary = calendarSummary(h);
+        const colorId = getEventColorId(h);
+        if (item.summary !== summary || item.colorId !== colorId) {
+          await client.events.patch({ calendarId, eventId: item.id, resource: { summary, colorId,
+            extendedProperties: { private: { ...item.extendedProperties?.private, managedBy: 'hack-scrapper' } } } });
+          updated++;
+        }
+      }
+    } catch (error) { console.error(`Calendar maintenance failed for ${h.name}: ${error.code || error.name}`); }
+  }
+  cachedCalendarEventsMap = null;
+  console.log(`Calendar maintenance: ${deleted} removed, ${updated} titles/colors updated.`);
+  return { deleted, updated };
+}
+
 module.exports = {
+  maintainCalendar,
   addEventToCalendar,
   clearAllCalendarEvents,
   isCalendarConfigured,

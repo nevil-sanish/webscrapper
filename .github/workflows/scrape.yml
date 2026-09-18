@@ -7,6 +7,10 @@ on:
     - cron: '0 6 */2 * *'
   workflow_dispatch: # Allows manual triggering from GitHub UI
 
+concurrency:
+  group: hack-scrapper-calendar
+  cancel-in-progress: false
+
 jobs:
   scrape-and-sync:
     runs-on: ubuntu-latest
@@ -27,13 +31,35 @@ jobs:
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps chromium
 
+    - name: Restore discovery cache
+      uses: actions/cache/restore@v4
+      with:
+        path: scraper/search/discoveryState.json
+        key: discovery-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: discovery-
+
     - name: Run Hackathon Scraper & Sync Calendar
       env:
+        TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
         GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID || secrets.GOOGLE_SEARCH_CLIENT_ID }}
         GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET || secrets.GOOGLE_SEARCH_CLIENT_SECRET }}
         GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
         GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
       run: |
-        node scripts/delete-filtered.js
         node scraper/run-scraper.js
+
+    - name: Save discovery cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: scraper/search/discoveryState.json
+        key: discovery-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Upload discovery diagnostics
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: discovery-report
+        path: scraper/search/discoveryReport.json
+        if-no-files-found: ignore

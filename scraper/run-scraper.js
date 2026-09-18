@@ -4,14 +4,15 @@ require('dotenv').config();
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
-const { discoverViaSearch } = require('./search/serpApiSearch');
+const { discoverViaSearch } = require('./search/discovery');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
-const { addEventToCalendar, isCalendarConfigured } = require('./utils/calendar');
+const { addEventToCalendar, isCalendarConfigured, maintainCalendar } = require('./utils/calendar');
 
 async function run() {
   console.log('Starting Hack Scrapper Run...');
+  if (isCalendarConfigured()) await maintainCalendar();
 
   let allNewHackathons = [];
 
@@ -24,7 +25,7 @@ async function run() {
   allNewHackathons = allNewHackathons.concat(unstopData);
 
   // 3. Google Search Discovery (Kerala-first, up to 10 results per query)
-  const searchData = await discoverViaSearch();
+  const searchData = await discoverViaSearch({ platformsCovered: true });
   allNewHackathons = allNewHackathons.concat(searchData);
 
   console.log(`\nTotal scraped/extracted: ${allNewHackathons.length}`);

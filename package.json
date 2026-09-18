@@ -5,6 +5,7 @@
   "main": "scraper/run-scraper.js",
   "scripts": {
     "start": "node scraper/run-scraper.js",
+    "discover": "node scraper/search/discovery.js",
     "scrape": "node scraper/run-scraper.js",
     "test": "node --test tests/*.test.js",
     "auth:calendar": "node scripts/auth-calendar.js"

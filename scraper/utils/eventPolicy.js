@@ -44,7 +44,7 @@ function classifyAttendance(event, content = '') {
   // An explicit physical-round venue overrides an online label or organizer address.
   const roundVenueLine = evidence.find(line => /\b(?:at|in|venue|location)\b/i.test(line));
   const roundVenue = roundVenueLine?.replace(/^.*?\b(?:held at|held in|venue\s*:?|location\s*:?|at|in)\s+/i, '');
-  const inferredVenue = roundVenue || ((isGeneric(location) || evidence.length) ? venueLines.find(line => !/\b(?:online|virtual)\b/i.test(line)) : '');
+  const inferredVenue = roundVenue || (isGeneric(location) ? venueLines.find(line => !/^(?:venue|location)\s*:?$/i.test(line) && !/\b(?:online|virtual)\b/i.test(line)) : '');
   let resolvedLocation = location;
   if (isOffline && inferredVenue) resolvedLocation = inferredVenue;
   if (isOffline && isGeneric(resolvedLocation)) {
