@@ -49,6 +49,12 @@ function deduplicateHackathons(hackathons) {
     }
 
     if (match) {
+      if (h.mode === 'offline' || h.mode === 'both' || h.mode === 'hybrid') {
+        match.mode = 'offline';
+        match.attendanceAnalyzed = h.attendanceAnalyzed;
+        match.attendanceEvidence = h.attendanceEvidence;
+        if (h.location) match.location = h.location;
+      }
       // Merge details if missing or default
       const fields = ['endDate', 'registrationDeadline', 'organizer', 'prize', 'eligibility', 'description'];
       for (let field of fields) {
@@ -83,6 +89,8 @@ function deduplicateHackathons(hackathons) {
         endDate: normalizeDate(h.endDate),
         registrationDeadline: normalizeDate(h.registrationDeadline),
         mode: h.mode || 'unknown',
+        attendanceAnalyzed: h.attendanceAnalyzed,
+        attendanceEvidence: h.attendanceEvidence,
         location: h.location || 'Online',
         organizer: h.organizer,
         prize: h.prize,

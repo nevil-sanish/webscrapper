@@ -1,3 +1,4 @@
+const { classifyAttendance, plainText } = require('./eventPolicy');
 const cheerio = require('cheerio');
 
 const MONTH_NAMES = {
@@ -183,8 +184,8 @@ function parseExactHackathonPage(html, pageUrl) {
   // ----------------------------------------------------
   // 3. Extract Place & Mode
   // ----------------------------------------------------
-  let place = 'Online';
-  let mode = 'online';
+  let place = '';
+  let mode = 'unknown';
 
   if (jsonLdEvent) {
     // Check eventAttendanceMode
@@ -214,33 +215,22 @@ function parseExactHackathonPage(html, pageUrl) {
         }
         if (parts.length > 0) {
           place = parts.join(', ');
-          if (mode === 'online') mode = 'offline';
+          mode = 'offline';
         }
       }
     }
   }
 
-  const bodyText = $('body').text();
+  const bodyText = plainText($('body').html());
 
   // If place not found from JSON-LD, look in DOM
-  if (place === 'Online') {
+  if (!place || place === 'Online') {
     // Check "Happening", "Venue", "Location", "Place"
     const venueMatch = bodyText.match(/(?:Happening|Venue|Location|Place)\s*[:\n]\s*([A-Za-z0-9\s,.-]{3,80})/i);
     if (venueMatch) {
       const candidate = venueMatch[1].replace(/\n.*$/g, '').trim();
       if (!/^(online|virtual|tba|tbd|remote)/i.test(candidate)) {
         place = candidate;
-        mode = 'offline';
-      }
-    }
-  }
-
-  // Scan text for mode clues if still generic
-  if (mode === 'online') {
-    if (/\b(in-person|offline|on-campus|physical)\b/i.test(bodyText)) {
-      if (/\b(online|virtual)\b/i.test(bodyText) && /\b(hybrid|both)\b/i.test(bodyText)) {
-        mode = 'both';
-      } else {
         mode = 'offline';
       }
     }
@@ -328,10 +318,13 @@ function parseExactHackathonPage(html, pageUrl) {
                $('meta[name="description"]').attr('content') ||
                $('p').first().text().trim().slice(0, 300);
 
+  const attendance = classifyAttendance({ name, location: place, mode }, bodyText);
   return {
     name: name,
-    place: place,
-    mode: mode,
+    place: attendance.location,
+    mode: attendance.mode,
+    attendanceAnalyzed: true,
+    attendanceEvidence: attendance.attendanceEvidence,
     fee: fee,
     registrationDeadline: registrationEndDate,
     startDate: registrationEndDate,

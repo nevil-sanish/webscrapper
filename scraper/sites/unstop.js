@@ -1,10 +1,10 @@
+const { classifyAttendance, contentText } = require('../utils/eventPolicy');
 const axios = require('axios');
-const { checkKeralaRelevance } = require('../utils/normalize');
 const { parseDateToYMD } = require('../utils/pageParser');
 
 /**
  * Scrapes Unstop hackathons across all pagination pages for:
- * https://unstop.com/hackathons?oppstatus=open&usertype=students
+ * https://unstop.com/hackathons?oppstatus=open
  * 
  * For each hackathon, visits its exact page/details to extract:
  * 1. Name (from center part)
@@ -14,19 +14,19 @@ const { parseDateToYMD } = require('../utils/pageParser');
  * 5. Registration Fee (from top right card: e.g. ₹ 1,500 or Free)
  */
 async function scrapeUnstop() {
-  console.log('Scraping Unstop (https://unstop.com/hackathons?oppstatus=open&usertype=students)...');
+  console.log('Scraping Unstop (https://unstop.com/hackathons?oppstatus=open)...');
   const hackathons = [];
   
   try {
     let page = 1;
     let hasMore = true;
-    const maxPages = 15;
     const opportunityIds = [];
+    const seenIds = new Set();
     
     // Step 1: Discover hackathons across search pages 1, 2, 3...
-    while (hasMore && page <= maxPages) {
+    while (hasMore) {
       console.log(`Fetching Unstop search page ${page}...`);
-      const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open&usertype=students`;
+      const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open`;
       
       const res = await axios.get(searchUrl, {
         headers: {
@@ -43,8 +43,10 @@ async function scrapeUnstop() {
         break;
       }
       
+      const previousCount = seenIds.size;
       for (let item of items) {
-        if (item.id) {
+        if (item.id && !seenIds.has(item.id)) {
+          seenIds.add(item.id);
           opportunityIds.push({
             id: item.id,
             seo_url: item.seo_url || item.public_url || ''
@@ -52,8 +54,9 @@ async function scrapeUnstop() {
         }
       }
       
-      const lastPage = res.data?.data?.last_page || 11;
-      if (page >= lastPage || items.length === 0) {
+      if (seenIds.size === previousCount) break;
+      const lastPage = res.data?.data?.last_page;
+      if ((lastPage && page >= lastPage) || items.length < 15) {
         hasMore = false;
       } else {
         page++;
@@ -188,7 +191,7 @@ async function scrapeUnstop() {
           sourceUrl = comp.public_url.startsWith('http') ? comp.public_url : `https://unstop.com/${comp.public_url.replace(/^\//, '')}`;
         }
           
-        const h = {
+        let h = {
           name: name,
           startDate: regClosingDate,
           endDate: parseDateToYMD(comp.end_date) || regClosingDate,
@@ -206,7 +209,7 @@ async function scrapeUnstop() {
           source: 'unstop'
         };
         
-        h.isKeralaRelevant = checkKeralaRelevance(h);
+        h = classifyAttendance(h, `${comp.details || ''} ${contentText(comp.rounds)} ${contentText(comp.stages)}`);
         hackathons.push(h);
       } catch (detailErr) {
         // Skip individual network failure

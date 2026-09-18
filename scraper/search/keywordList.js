@@ -1,33 +1,29 @@
-const keralaKeywords = [
-  "live hackathons in Kerala",
-  "upcoming hackathons in Kerala",
-  "hackathons happening in Kerala",
-  "hackathon Kerala September 2026",
-  "hackathon Kerala 2026 registration",
-  "online hackathon Kerala 2026",
-  "college hackathon Kerala 2026",
-  "student hackathon Kerala 2026",
-  "hackathon Kochi Kerala 2026",
-  "hackathon Trivandrum Kerala 2026",
-  "hackathon Kozhikode Kerala 2026",
-  "live hackathons in South India",
-  "upcoming hackathons in South India",
-  "hackathons happening in South India",
-  "hackathon South India September 2026",
-  "hackathon South India 2026 registration",
-  "college hackathon South India 2026",
-  "student hackathon South India 2026",
-  "hackathon Bangalore 2026",
-  "hackathon Chennai 2026",
-  "hackathon Hyderabad 2026",
-  "hackathon Tamil Nadu 2026",
-  "hackathon Karnataka 2026",
-  "hackathon Telangana 2026",
-  "hackathon Andhra Pradesh 2026",
-  "best hackathons in kottayam",
-  "all of the hackathons south kerala",
-  "site:devpost.com hackathons India 2026 registration",
-  "site:devpost.com open hackathons 2026"
+const keralaDistricts = [
+  'Thiruvananthapuram', 'Kollam', 'Pathanamthitta', 'Alappuzha',
+  'Kottayam', 'Idukki', 'Ernakulam', 'Thrissur', 'Palakkad',
+  'Malappuram', 'Kozhikode', 'Wayanad', 'Kannur', 'Kasaragod'
 ];
-
-module.exports = { keralaKeywords };
+const districtAliases = ['Trivandrum', 'Quilon', 'Alleppey', 'Kochi', 'Cochin',
+  'Trichur', 'Palghat', 'Calicut', 'Cannanore', 'Kannaur', 'Kasargod'];
+const keralaKeywords = [
+  ...keralaDistricts.flatMap(district => [
+    `hackathon in ${district} Kerala registration`,
+    `upcoming college hackathon in ${district} Kerala`,
+    `site:unstop.com hackathon ${district} Kerala`,
+    `site:devfolio.co hackathon ${district} Kerala`
+  ]),
+  ...districtAliases.map(city => `hackathon in ${city} Kerala`),
+  'upcoming hackathons Kerala registration',
+  'Kerala hackathon online round offline finals',
+  'Kerala college student hackathon registration',
+  'site:unstop.com hackathons Kerala',
+  'site:devfolio.co hackathons Kerala'
+];
+const otherStateKeywords = [
+  'upcoming hackathons Tamil Nadu registration',
+  'upcoming hackathons Karnataka registration',
+  'hackathon Chennai Tamil Nadu',
+  'hackathon Bengaluru Karnataka'
+];
+const searchKeywords = [...keralaKeywords, ...otherStateKeywords];
+module.exports = { keralaDistricts, keralaKeywords, otherStateKeywords, searchKeywords };

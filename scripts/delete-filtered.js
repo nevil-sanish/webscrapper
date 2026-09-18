@@ -15,30 +15,7 @@ const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
 oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
-const ALLOWED_STATES_CITIES = [
-  'kerala', 'tamil nadu', 'tamilnadu', 'karnataka',
-  'kochi', 'cochin', 'ernakulam', 'trivandrum', 'thiruvananthapuram', 'kozhikode', 'calicut', 'thrissur', 'trichur',
-  'kollam', 'quilon', 'kottayam', 'palakkad', 'palghat', 'kannur', 'cannanore', 'malappuram', 'alappuzha', 'alleppey',
-  'kasaragod', 'wayanad', 'idukki', 'pathanamthitta', 'karunagappally', 'kothamangalam', 'nilambur', 'nalanchira', 'thodiyoor',
-  'chennai', 'madras', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
-  'erode', 'vellore', 'thanjavur', 'dindigul', 'tiruppur', 'tirupur', 'kanchipuram', 'kancheepuram', 'karur', 'nagercoil',
-  'hosur', 'theni', 'sivakasi', 'virudhunagar', 'kattankulathur', 'cuddalore', 'kumbakonam', 'pollachi',
-  'bengaluru', 'bangalore', 'mysuru', 'mysore', 'mangaluru', 'mangalore', 'hubballi', 'hubli', 'belagavi',
-  'belgaum', 'udupi', 'shivamogga', 'shimoga', 'davanagere', 'ballari', 'bellary', 'gulbarga',
-  'kalaburagi', 'tumkur', 'tumakuru', 'dharwad', 'bidar', 'hassan'
-];
-
-function isAllowedOfflineLocation(locationStr, name, desc) {
-  const combined = `${locationStr || ''} ${name || ''} ${desc || ''}`.toLowerCase();
-  return ALLOWED_STATES_CITIES.some(t => new RegExp(`\\b${t}\\b`, 'i').test(combined));
-}
-
-function hasPrize(prizeStr) {
-  if (!prizeStr) return false;
-  const p = prizeStr.toLowerCase().trim();
-  if (p === '' || p === 'none' || p === 'no' || p === 'false' || p === '0' || p === 'nil') return false;
-  return true;
-}
+const { shouldKeepHackathon } = require('../scraper/utils/eventPolicy');
 
 async function run() {
   console.log('Fetching events to filter and delete...');
@@ -58,6 +35,9 @@ async function run() {
       const summary = item.summary || '';
       const description = item.description || '';
       
+      // Only manage scraper-created entries.
+      if (!/Mode:/i.test(description) || !/Link:/i.test(description)) continue;
+
       // Parse Mode
       const modeMatch = description.match(/Mode:\s*(.+)/i);
       const mode = modeMatch ? modeMatch[1].toLowerCase().trim() : '';
@@ -70,20 +50,7 @@ async function run() {
       const prizeMatch = description.match(/Prize:\s*(.+)/i);
       const prize = prizeMatch ? prizeMatch[1].trim() : '';
 
-      const isOnline = mode === 'online' || mode === 'virtual' || (!location || location.toLowerCase() === 'online');
-      const isBoth = mode === 'both' || mode === 'hybrid';
-      const isOffline = !isOnline && !isBoth;
-
-      let keep = false;
-      if (isOnline) {
-        keep = hasPrize(prize);
-      } else if (isOffline) {
-        keep = isAllowedOfflineLocation(location, summary, description);
-      } else if (isBoth) {
-        keep = hasPrize(prize) || isAllowedOfflineLocation(location, summary, description);
-      } else {
-        keep = hasPrize(prize) || isAllowedOfflineLocation(location, summary, description);
-      }
+      const keep = shouldKeepHackathon({ name: summary, description, mode, location });
 
       if (!keep) {
         console.log(`[DELETING] "${summary}" (Mode: ${mode || 'offline'}, Location: ${location}, Prize: ${prize || 'None'})`);

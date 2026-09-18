@@ -1,3 +1,4 @@
+const { classifyAttendance, shouldKeepHackathon, keralaPriority } = require('./utils/eventPolicy');
 require('dotenv').config();
 
 // Scrapers
@@ -18,11 +19,11 @@ async function run() {
   const devfolioData = await scrapeDevfolio();
   allNewHackathons = allNewHackathons.concat(devfolioData);
 
-  // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open&usertype=students)
+  // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open)
   const unstopData = await scrapeUnstop();
   allNewHackathons = allNewHackathons.concat(unstopData);
 
-  // 3. Google Search Discovery (top 5 websites per query)
+  // 3. Google Search Discovery (Kerala-first, up to 10 results per query)
   const searchData = await discoverViaSearch();
   allNewHackathons = allNewHackathons.concat(searchData);
 
@@ -34,48 +35,10 @@ async function run() {
     const uniqueHackathons = deduplicateHackathons(allNewHackathons);
     console.log(`Found ${uniqueHackathons.length} unique hackathons before filtering.`);
 
-    // Filtering Logic
-    const ALLOWED_STATES_CITIES = [
-      'kerala', 'tamil nadu', 'tamilnadu', 'karnataka',
-      'kochi', 'cochin', 'ernakulam', 'trivandrum', 'thiruvananthapuram', 'kozhikode', 'calicut', 'thrissur', 'trichur',
-      'kollam', 'quilon', 'kottayam', 'palakkad', 'palghat', 'kannur', 'cannanore', 'malappuram', 'alappuzha', 'alleppey',
-      'kasaragod', 'wayanad', 'idukki', 'pathanamthitta', 'karunagappally', 'kothamangalam', 'nilambur', 'nalanchira', 'thodiyoor',
-      'chennai', 'madras', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
-      'erode', 'vellore', 'thanjavur', 'dindigul', 'tiruppur', 'tirupur', 'kanchipuram', 'kancheepuram', 'karur', 'nagercoil',
-      'hosur', 'theni', 'sivakasi', 'virudhunagar', 'kattankulathur', 'cuddalore', 'kumbakonam', 'pollachi',
-      'bengaluru', 'bangalore', 'mysuru', 'mysore', 'mangaluru', 'mangalore', 'hubballi', 'hubli', 'belagavi',
-      'belgaum', 'udupi', 'shivamogga', 'shimoga', 'davanagere', 'ballari', 'bellary', 'gulbarga',
-      'kalaburagi', 'tumkur', 'tumakuru', 'dharwad', 'bidar', 'hassan'
-    ];
-
-    function isAllowedOfflineLocation(h) {
-      const combined = `${h.location || ''} ${h.name || ''} ${h.description || ''}`.toLowerCase();
-      return ALLOWED_STATES_CITIES.some(t => new RegExp(`\\b${t}\\b`, 'i').test(combined));
-    }
-
-    function hasPrize(h) {
-      if (!h.prize) return false;
-      const p = h.prize.toString().toLowerCase().trim();
-      if (p === '' || p === 'none' || p === 'no' || p === 'false' || p === '0' || p === 'nil') return false;
-      return true;
-    }
-
-    const filteredHackathons = uniqueHackathons.filter(h => {
-      const mode = (h.mode || '').toLowerCase();
-      const isOnline = mode === 'online' || mode === 'virtual' || (!h.location || h.location.toLowerCase() === 'online');
-      const isBoth = mode === 'both' || mode === 'hybrid';
-      const isOffline = !isOnline && !isBoth;
-
-      let keep = false;
-      if (isOnline) {
-        keep = hasPrize(h);
-      } else if (isOffline) {
-        keep = isAllowedOfflineLocation(h);
-      } else if (isBoth) {
-        keep = hasPrize(h) || isAllowedOfflineLocation(h);
-      }
-      return keep;
-    });
+    const filteredHackathons = uniqueHackathons
+      .map(h => classifyAttendance(h))
+      .filter(shouldKeepHackathon)
+      .sort((a, b) => keralaPriority(b) - keralaPriority(a));
 
     console.log(`Kept ${filteredHackathons.length} hackathons after filtering rules.`);
 

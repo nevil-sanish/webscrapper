@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node scraper/run-scraper.js",
     "scrape": "node scraper/run-scraper.js",
+    "test": "node --test tests/*.test.js",
     "auth:calendar": "node scripts/auth-calendar.js"
   },
   "keywords": [],

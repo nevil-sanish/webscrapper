@@ -1,15 +1,11 @@
 const axios = require('axios');
 const { chromium } = require('playwright');
-const { keralaKeywords } = require('./keywordList');
-const { checkKeralaRelevance } = require('../utils/normalize');
+const { searchKeywords } = require('./keywordList');
+const { keralaPriority } = require('../utils/eventPolicy');
 const { parseExactHackathonPage } = require('../utils/pageParser');
 
-const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
-
 const SERP_API_KEY = process.env.SERP_API_KEY;
-const stateFile = path.join(__dirname, 'searchState.json');
 
 /**
  * Searches Google via SerpApi, visits each discovered hackathon exact page,
@@ -25,31 +21,8 @@ async function discoverViaSearch() {
     return [];
   }
 
-  // Read last used keyword index from local state file
-  let currentIndex = 0;
-  try {
-    if (fs.existsSync(stateFile)) {
-      const data = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-      currentIndex = data.currentIndex || 0;
-    }
-  } catch (e) {
-    currentIndex = 0;
-  }
-
-  const keywordsToUse = [];
-  const numKeywords = 5;
-  for (let i = 0; i < numKeywords; i++) {
-    keywordsToUse.push(keralaKeywords[(currentIndex + i) % keralaKeywords.length]);
-  }
-
-  // Save next index to local state file
-  try {
-    fs.writeFileSync(
-      stateFile,
-      JSON.stringify({ currentIndex: (currentIndex + numKeywords) % keralaKeywords.length }, null, 2),
-      'utf8'
-    );
-  } catch (e) {}
+  // Search every district each run, with Kerala queries first.
+  const keywordsToUse = searchKeywords;
 
   for (let query of keywordsToUse) {
     console.log(`SerpApi Google Query: "${query}"`);
@@ -59,7 +32,7 @@ async function discoverViaSearch() {
           engine: 'google',
           q: query,
           api_key: SERP_API_KEY,
-          num: 5,
+          num: 10,
           gl: 'in',
           hl: 'en'
         },
@@ -78,17 +51,12 @@ async function discoverViaSearch() {
     }
   }
 
-  // Filter out social media and non-event aggregation lists
+  // Filter social domains by hostname, without excluding unrelated URLs containing x.com.
   const filteredUrls = Array.from(allUrls).filter(u => {
-    return !u.includes('facebook.com') && 
-           !u.includes('twitter.com') && 
-           !u.includes('x.com') && 
-           !u.includes('youtube.com') &&
-           !u.includes('instagram.com') &&
-           !u.includes('linkedin.com') &&
-           !u.includes('reddit.com') &&
-           !u.includes('wikipedia.org');
-  }).slice(0, 10); // Inspect top 10 candidate URLs per run
+    const host = new URL(u).hostname.toLowerCase();
+    return !['facebook.com', 'twitter.com', 'x.com', 'youtube.com', 'instagram.com',
+      'linkedin.com', 'reddit.com', 'wikipedia.org'].some(domain => host === domain || host.endsWith(`.${domain}`));
+  }); // Inspect every unique candidate; no global cap.
 
   console.log(`Discovered ${allUrls.size} URLs, inspecting ${filteredUrls.length} exact event pages...`);
   const hackathons = [];
@@ -138,6 +106,8 @@ async function discoverViaSearch() {
             registrationDeadline: parsed.registrationDeadline,
             location: parsed.place,
             mode: parsed.mode,
+            attendanceAnalyzed: parsed.attendanceAnalyzed,
+            attendanceEvidence: parsed.attendanceEvidence,
             fee: parsed.fee || 'Free',
             organizer: null,
             prize: null,
@@ -147,7 +117,7 @@ async function discoverViaSearch() {
             sourceUrl: url,
             source: 'search-exact-page'
           };
-          h.isKeralaRelevant = checkKeralaRelevance(h);
+          h.isKeralaRelevant = Boolean(keralaPriority(h));
           hackathons.push(h);
           console.log(`Parsed exact hackathon from search: "${h.name}" (mode: ${h.mode}, place: ${h.location}, regDeadline: ${h.startDate})`);
         }

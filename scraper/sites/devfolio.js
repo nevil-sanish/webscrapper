@@ -1,6 +1,6 @@
+const { classifyAttendance, keralaPriority, plainText } = require('../utils/eventPolicy');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { checkKeralaRelevance } = require('../utils/normalize');
 const { parseDateToYMD, parseCountdownToDate } = require('../utils/pageParser');
 
 /**
@@ -22,6 +22,7 @@ async function scrapeDevfolio() {
     const now = new Date();
     const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const openHackathonsList = [];
+    const seenSubdomains = new Set();
 
     // Step 1: Discover list of open hackathons from Devfolio
     while (hasMore) {
@@ -47,11 +48,13 @@ async function scrapeDevfolio() {
         break;
       }
 
+      const previousCount = seenSubdomains.size;
       for (let item of hits) {
         const hit = item._source;
         if (!hit || !hit.name) continue;
         const subdomain = hit.hackathon_setting?.subdomain || hit.subdomain || hit.slug;
-        if (subdomain) {
+        if (subdomain && !seenSubdomains.has(subdomain)) {
+          seenSubdomains.add(subdomain);
           openHackathonsList.push({
             subdomain: subdomain,
             slug: hit.slug || subdomain,
@@ -61,8 +64,9 @@ async function scrapeDevfolio() {
         }
       }
 
+      if (seenSubdomains.size === previousCount) break;
       from += hits.length;
-      if (hits.length < size || from >= total) {
+      if (hits.length < size || (total > 0 && from >= total)) {
         hasMore = false;
       } else {
         await new Promise(r => setTimeout(r, 200));
@@ -70,6 +74,8 @@ async function scrapeDevfolio() {
     }
 
     console.log(`Discovered ${openHackathonsList.length} open hackathons. Visiting exact pages...`);
+
+    openHackathonsList.sort((a, b) => keralaPriority(b.initialHit) - keralaPriority(a.initialHit));
 
     // Step 2: Visit each hackathon's exact page to parse name, place, mode, and countdown registration end date
     for (let item of openHackathonsList) {
@@ -107,7 +113,7 @@ async function scrapeDevfolio() {
         let place = nextData?.location ||
                     [nextData?.city, nextData?.state, nextData?.country].filter(Boolean).join(', ') ||
                     item.initialHit?.location;
-        const bodyText = $('body').text();
+        const bodyText = plainText($('body').html());
         const happeningMatch = bodyText.match(/HAPPENING\s*\n+([^\n]+)/i);
         if (happeningMatch && !/online/i.test(happeningMatch[1])) {
           place = happeningMatch[1].trim();
@@ -181,7 +187,7 @@ async function scrapeDevfolio() {
           ? (nextData?.prizes || item.initialHit?.prizes).map(p => p.name).slice(0, 3).join(', ')
           : null;
 
-        const h = {
+        let h = {
           name: name,
           startDate: regEndDate,
           endDate: nextData?.ends_at || item.initialHit?.ends_at || regEndDate,
@@ -202,7 +208,7 @@ async function scrapeDevfolio() {
           source: 'devfolio'
         };
 
-        h.isKeralaRelevant = checkKeralaRelevance(h);
+        h = classifyAttendance(h, `${bodyText} ${nextData?.desc || item.initialHit?.desc || ''}`);
         hackathons.push(h);
       } catch (err) {
         // Fallback to initialHit if exact page fetch failed
@@ -212,7 +218,7 @@ async function scrapeDevfolio() {
         if (regEndDate && regEndDate >= todayYMD) {
           const loc = hit.location || [hit.city, hit.state].filter(Boolean).join(', ') || (hit.is_online ? 'Online' : 'In-person');
           let mode = hit.is_online === false ? 'offline' : (loc.toLowerCase() !== 'online' ? 'both' : 'online');
-          const h = {
+          let h = {
             name: hit.name,
             startDate: regEndDate,
             endDate: hit.ends_at || regEndDate,
@@ -227,7 +233,7 @@ async function scrapeDevfolio() {
             sourceUrl: exactUrl,
             source: 'devfolio'
           };
-          h.isKeralaRelevant = checkKeralaRelevance(h);
+          h = classifyAttendance(h, hit.desc || '');
           hackathons.push(h);
         }
       }
