@@ -125,7 +125,8 @@ async function discoverViaSearch(options = {}) {
       }
       if (!parsed) { record.reason = diagnostics.reason || 'unparseable-event'; return; }
       if (!isHackathon(parsed, html)) { record.reason = 'not-a-hackathon'; return; }
-      const event = { ...parsed, location: parsed.place, endDate: parsed.registrationDeadline,
+      const event = { ...parsed, location: parsed.place,
+        endDate: parsed.eventEndDate || parsed.registrationDeadline,
         source: 'web-discovery', isKeralaRelevant: Boolean(keralaPriority({ location: parsed.place })) };
       if (!shouldKeepHackathon(event)) { record.reason = 'outside-allowed-region-or-unknown-venue'; return; }
       events.push(event);

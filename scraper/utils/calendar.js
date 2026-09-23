@@ -1,4 +1,5 @@
-const { originalName, calendarSummary, isManaged, isPastEvent, fromCalendar } = require('./calendarPolicy');
+const { originalName, calendarSummary, isManaged, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
+const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
 const { keralaPriority } = require('./eventPolicy');
 const { google } = require('googleapis');
@@ -170,62 +171,69 @@ function getColorName(colorId) {
   }
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// A wrong date on one source must not paint a band across the whole calendar.
+const MAX_SPAN_DAYS = 60;
+
+// Accepts YYYY-MM-DD, ISO timestamps and the Date objects deduplication produces.
+function toDay(value) {
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : localDay(value);
+  return parseDateToYMD(String(value || ''));
+}
+
+function addDays(ymd, count) {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + count);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+}
+
+// "23 Sep 2026" - unambiguous, unlike the locale-dependent 9/23/2026.
+function formatDay(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || '');
+  return m ? `${m[3]} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : '';
+}
+
 /**
- * Creates or updates a single-day calendar event for a hackathon on its registration deadline / start date.
+ * The entry opens on the registration deadline and runs through the last day
+ * of the hackathon itself. A hackathon whose registration closed days before
+ * it is conducted then stays visible while it is still running, instead of
+ * looking finished on its deadline, and maintenance only clears it once the
+ * event is genuinely over.
+ * @returns {{start: string, lastDay: string, end: string}|null} null when the whole event is past
+ */
+function calendarWindow(hackathon, now = new Date()) {
+  const deadline = toDay(hackathon.startDate || hackathon.registrationDeadline);
+  if (!deadline) return null;
+
+  const later = [hackathon.eventEndDate, hackathon.endDate, hackathon.eventConductedDate]
+    .map(toDay).filter(day => day && day > deadline).sort();
+  let lastDay = later[later.length - 1] || deadline;
+  if (daysBetween(deadline, lastDay) > MAX_SPAN_DAYS) lastDay = deadline;
+
+  if (lastDay < localDay(now)) return null;
+  return { start: deadline, lastDay, end: addDays(lastDay, 1) };
+}
+
+/**
+ * Creates or updates the all-day calendar entry for a hackathon, spanning its
+ * registration deadline through the last day of the event.
  * @param {Object} hackathon - The hackathon object
  * @returns {Promise<boolean>} - True if newly added or updated, false if unchanged or skipped
  */
 async function addEventToCalendar(hackathon) {
   if (!calendar) return false;
+  if (!hackathon.name) return false;
 
-  if (!hackathon.name || !hackathon.startDate) {
-    return false;
-  }
+  const window = calendarWindow(hackathon);
+  if (!window) return false;
 
-  const start = new Date(hackathon.startDate);
-  if (isNaN(start.getTime())) {
-    return false;
-  }
-
-  // Filter: ONLY events that happen today or in the future
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let eventStartDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-
-  if (eventStartDay < today) {
-    // If the event started earlier, check if it is still ongoing (endDate >= today)
-    if (hackathon.endDate) {
-      const end = new Date(hackathon.endDate);
-      if (!isNaN(end.getTime())) {
-        const eventEndDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-        if (eventEndDay >= today) {
-          // Active ongoing hackathon - schedule single-day reminder on today
-          eventStartDay = today;
-        } else {
-          // Event completed in the past
-          return false;
-        }
-      } else {
-        return false;
-      }
-    } else {
-      // Event started in the past with no future end date, skip
-      return false;
-    }
-  }
-
-  // Format: ONLY for the first day (All-day single-day event)
-  const formatYMD = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
-  const startDateStr = formatYMD(eventStartDay);
-  const nextDay = new Date(eventStartDay);
-  nextDay.setDate(nextDay.getDate() + 1);
-  const nextDayStr = formatYMD(nextDay);
+  const startDateStr = window.start;
+  // Google treats an all-day end as exclusive, so the entry ends the day after.
+  const nextDayStr = window.end;
 
   // Kerala green, other online blue, other offline red.
   const colorId = getEventColorId(hackathon);
@@ -238,9 +246,16 @@ async function addEventToCalendar(hackathon) {
   desc += `Link: ${hackathon.sourceUrl}\n`;
   if (hackathon.fee) desc += `Registration Fee: ${hackathon.fee}\n`;
   if (hackathon.daysLeft) desc += `Days Left: ${hackathon.daysLeft}\n`;
-  if (hackathon.registrationDeadline) desc += `Registration Deadline: ${new Date(hackathon.registrationDeadline).toLocaleDateString()}\n`;
-  if (hackathon.startDate) desc += `Event Date / Deadline: ${new Date(hackathon.startDate).toLocaleDateString()}\n`;
-  if (hackathon.endDate) desc += `End Date: ${new Date(hackathon.endDate).toLocaleDateString()}\n`;
+
+  const deadlineDay = toDay(hackathon.registrationDeadline) || startDateStr;
+  desc += `Registration Deadline: ${formatDay(deadlineDay)}\n`;
+  const eventStart = toDay(hackathon.eventConductedDate);
+  const eventEnd = toDay(hackathon.eventEndDate) || toDay(hackathon.endDate);
+  if (eventStart || eventEnd) {
+    const first = eventStart || eventEnd;
+    const last = eventEnd && eventEnd > first ? eventEnd : null;
+    desc += `Event Dates: ${formatDay(first)}${last ? ` - ${formatDay(last)}` : ''}\n`;
+  }
   if (hackathon.organizer) desc += `Organizer: ${hackathon.organizer}\n`;
   if (hackathon.prize) desc += `Prize: ${hackathon.prize}\n`;
   if (hackathon.eligibility) desc += `Eligibility: ${hackathon.eligibility}\n`;
@@ -253,9 +268,11 @@ async function addEventToCalendar(hackathon) {
 
   if (existing) {
     const existingDate = (existing.start?.date || existing.start?.dateTime || '').slice(0, 10);
+    const existingEnd = (existing.end?.date || existing.end?.dateTime || '').slice(0, 10);
     const existingDesc = (existing.description || '').trim();
-    // If the event already exists with the exact same date, color, and description, skip as duplicate
-    if (existingDate === startDateStr && existing.colorId === colorId && existingDesc === desc.trim() && existing.summary === summary) {
+    // If the event already exists with the exact same dates, color, and description, skip as duplicate
+    if (existingDate === startDateStr && existingEnd === nextDayStr &&
+        existing.colorId === colorId && existingDesc === desc.trim() && existing.summary === summary) {
       return false;
     }
 
@@ -274,8 +291,9 @@ async function addEventToCalendar(hackathon) {
           location: hackathon.location || 'Online'
         }
       });
-      console.log(`Updated Google Calendar event "${hackathon.name}" (date: ${startDateStr}, color: ${colorName})`);
+      console.log(`Updated Google Calendar event "${hackathon.name}" (${startDateStr} to ${window.lastDay}, color: ${colorName})`);
       existing.start = { date: startDateStr };
+      existing.end = { date: nextDayStr };
       existing.summary = summary;
       existing.colorId = colorId;
       existing.description = desc;
@@ -296,7 +314,7 @@ async function addEventToCalendar(hackathon) {
       date: startDateStr,
     },
     end: {
-      date: nextDayStr, // Next day ensures it appears ONLY on the start day in Google Calendar
+      date: nextDayStr, // Exclusive: the entry covers up to and including window.lastDay
     },
   };
 
@@ -305,8 +323,8 @@ async function addEventToCalendar(hackathon) {
       calendarId: CALENDAR_ID,
       resource: event,
     });
-    console.log(`Event created in Google Calendar for "${hackathon.name}" on ${startDateStr} (color: ${colorName}): ${res.data.htmlLink}`);
-    existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, colorId, summary, description: desc });
+    console.log(`Event created in Google Calendar for "${hackathon.name}" (${startDateStr} to ${window.lastDay}, color: ${colorName}): ${res.data.htmlLink}`);
+    existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, end: { date: nextDayStr }, colorId, summary, description: desc });
     return true;
   } catch (error) {
     console.error(`Error creating calendar event for "${hackathon.name}":`, error.response?.data?.error?.message || error.message);
@@ -401,6 +419,7 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
 
 module.exports = {
   maintainCalendar,
+  calendarWindow,
   addEventToCalendar,
   clearAllCalendarEvents,
   isCalendarConfigured,

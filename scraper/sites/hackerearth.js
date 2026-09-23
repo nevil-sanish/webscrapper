@@ -45,8 +45,10 @@ async function scrapeHackerEarth() {
             const h = {
               name: parsed.name,
               startDate: parsed.registrationDeadline,
-              endDate: parsed.registrationDeadline,
+              endDate: parsed.eventEndDate || parsed.registrationDeadline,
               registrationDeadline: parsed.registrationDeadline,
+              eventConductedDate: parsed.eventConductedDate,
+              eventEndDate: parsed.eventEndDate,
               location: parsed.place || 'Online',
               mode: parsed.mode || 'online',
               organizer: null,

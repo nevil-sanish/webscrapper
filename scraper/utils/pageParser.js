@@ -16,6 +16,13 @@ const MONTH_NAMES = {
   dec: '12', december: '12'
 };
 
+// Sources publish timestamps in their own zone (Unstop in +05:30, Devfolio in
+// UTC). Slicing the date out of a UTC timestamp lands a day early for anything
+// after 18:30 UTC, so a full timestamp is read in the event timezone instead.
+const EVENT_TIME_ZONE = process.env.EVENT_TIME_ZONE || 'Asia/Kolkata';
+const dayInEventZone = new Intl.DateTimeFormat('en-CA',
+  { timeZone: EVENT_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+
 /**
  * Normalizes date string into YYYY-MM-DD format
  * Supports:
@@ -26,6 +33,12 @@ const MONTH_NAMES = {
 function parseDateToYMD(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return null;
   const clean = dateStr.trim();
+
+  // 0. Full timestamp: resolve it in the event timezone before taking the day
+  if (/^20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(clean)) {
+    const stamp = new Date(clean.replace(' ', 'T'));
+    if (!isNaN(stamp.getTime())) return dayInEventZone.format(stamp);
+  }
 
   // 1. Direct ISO match: YYYY-MM-DD
   const isoMatch = clean.match(/\b(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
@@ -360,6 +373,8 @@ function parseExactHackathonPage(html, pageUrl, options = {}) {
     fee: fee,
     registrationDeadline: registrationEndDate,
     startDate: registrationEndDate,
+    eventConductedDate: parseDateToYMD(String(jsonLdEvent?.startDate || '')),
+    eventEndDate: parseDateToYMD(String(jsonLdEvent?.endDate || '')),
     description: desc || null,
     sourceUrl: pageUrl
   };

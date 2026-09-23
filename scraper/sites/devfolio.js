@@ -11,6 +11,22 @@ const { parseDateToYMD, parseCountdownToDate } = require('../utils/pageParser');
  * 3. mode (online, offline, both)
  * 4. registration end date (from countdown timer / reg_ends_at)
  */
+function resolveRegistrationDeadline({ timerTimestamp, bodyText, now = new Date(), todayYMD, countdownParser = parseCountdownToDate } = {}) {
+  const today = todayYMD || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  // The rendered countdown is the live source of truth. Devfolio's search
+  // index can retain an old reg_ends_at value after organisers extend a
+  // deadline.
+  const text = String(bodyText || '');
+  const timerTextMatch = text.match(/APPLICATIONS CLOSE IN\s*([0-9dhm:\s]+)/i) ||
+    text.match(/(\d+\s*d(?:ays?)?\s*(?:\d+\s*h(?:ours?)?)?\s*(?:\d+\s*m(?:inutes?)?)?\s*left)/i);
+  const liveCountdownDate = timerTextMatch ? countdownParser(timerTextMatch[1]) : null;
+  if (liveCountdownDate && liveCountdownDate >= today) return liveCountdownDate;
+
+  const indexedDate = timerTimestamp ? parseDateToYMD(timerTimestamp) : null;
+  return indexedDate && indexedDate >= today ? indexedDate : null;
+}
+
 async function scrapeDevfolio() {
   console.log('Scraping Devfolio (https://devfolio.co/hackathons/open)...');
   const hackathons = [];
@@ -143,7 +159,7 @@ async function scrapeDevfolio() {
                                item.initialHit?.hackathon_setting?.reg_ends_at ||
                                item.initialHit?.reg_ends_at;
 
-        let regEndDate = timerTimestamp ? parseDateToYMD(timerTimestamp) : null;
+        let regEndDate = resolveRegistrationDeadline({ timerTimestamp, bodyText, now, todayYMD });
 
         // Days left string calculation
         let daysLeftStr = null;
@@ -161,10 +177,7 @@ async function scrapeDevfolio() {
         if (!regEndDate) {
           const timerTextMatch = bodyText.match(/APPLICATIONS CLOSE IN\s*([0-9dhm:\s]+)/i) ||
                                  bodyText.match(/(\d+\s*d(?:ays?)?\s*(?:\d+\s*h(?:ours?)?)?\s*left)/i);
-          if (timerTextMatch) {
-            regEndDate = parseCountdownToDate(timerTextMatch[1]);
-            daysLeftStr = timerTextMatch[1].trim();
-          }
+          if (timerTextMatch) daysLeftStr = timerTextMatch[1].trim();
         }
 
         // Filter: Must have a valid registration closing date that is today or in the future
@@ -190,9 +203,10 @@ async function scrapeDevfolio() {
         let h = {
           name: name,
           startDate: regEndDate,
-          endDate: nextData?.ends_at || item.initialHit?.ends_at || regEndDate,
+          endDate: parseDateToYMD(nextData?.ends_at || item.initialHit?.ends_at || '') || regEndDate,
           registrationDeadline: regEndDate,
-          eventConductedDate: nextData?.starts_at || item.initialHit?.starts_at || null,
+          eventConductedDate: parseDateToYMD(nextData?.starts_at || item.initialHit?.starts_at || ''),
+          eventEndDate: parseDateToYMD(nextData?.ends_at || item.initialHit?.ends_at || ''),
           location: place,
           mode: mode,
           fee: fee,
@@ -221,8 +235,10 @@ async function scrapeDevfolio() {
           let h = {
             name: hit.name,
             startDate: regEndDate,
-            endDate: hit.ends_at || regEndDate,
+            endDate: parseDateToYMD(hit.ends_at || '') || regEndDate,
             registrationDeadline: regEndDate,
+            eventConductedDate: parseDateToYMD(hit.starts_at || ''),
+            eventEndDate: parseDateToYMD(hit.ends_at || ''),
             location: loc,
             mode: mode,
             organizer: hit.tagline || null,
@@ -249,4 +265,4 @@ async function scrapeDevfolio() {
   return hackathons;
 }
 
-module.exports = { scrapeDevfolio };
+module.exports = { scrapeDevfolio, resolveRegistrationDeadline };

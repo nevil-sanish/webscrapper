@@ -56,7 +56,8 @@ function deduplicateHackathons(hackathons) {
         if (h.location) match.location = h.location;
       }
       // Merge details if missing or default
-      const fields = ['endDate', 'registrationDeadline', 'organizer', 'prize', 'eligibility', 'description'];
+      const fields = ['endDate', 'registrationDeadline', 'eventConductedDate', 'eventEndDate',
+        'fee', 'daysLeft', 'organizer', 'prize', 'eligibility', 'description'];
       for (let field of fields) {
         if (!match[field] && h[field]) {
           match[field] = h[field];
@@ -88,6 +89,12 @@ function deduplicateHackathons(hackathons) {
         startDate: dateNew,
         endDate: normalizeDate(h.endDate),
         registrationDeadline: normalizeDate(h.registrationDeadline),
+        // The event's own dates, kept apart from the registration deadline so
+        // the calendar entry can span the days the hackathon actually runs.
+        eventConductedDate: h.eventConductedDate || null,
+        eventEndDate: h.eventEndDate || null,
+        fee: h.fee || null,
+        daysLeft: h.daysLeft || null,
         mode: h.mode || 'unknown',
         attendanceAnalyzed: h.attendanceAnalyzed,
         attendanceEvidence: h.attendanceEvidence,

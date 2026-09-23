@@ -4,6 +4,53 @@ const axios = require('axios');
 const { parseDateToYMD } = require('../utils/pageParser');
 
 /**
+ * Unstop exposes several independent date windows per opportunity, and only
+ * the registration window says when registration closes. A LIVE submission
+ * round normally ends days after registration is shut, so reading its
+ * end_date as the deadline advertises a hackathon nobody can still enter.
+ * Rounds are used for the deadline only when the registration window itself
+ * is missing, and always for the dates the hackathon is actually conducted on.
+ */
+function roundDetails(comp) {
+  return (Array.isArray(comp.rounds) ? comp.rounds : [])
+    .flatMap(r => (Array.isArray(r.details) ? r.details : []).map(d => ({ ...d, roundTitle: r.title || '' })));
+}
+
+function earliestEnd(details) {
+  return details.map(d => parseDateToYMD(d.end_date || '')).filter(Boolean).sort()[0] || null;
+}
+
+function resolveUnstopDates(comp) {
+  const details = roundDetails(comp);
+  const titled = pattern => earliestEnd(details.filter(d => pattern.test(`${d.roundTitle} ${d.title || ''}`)));
+
+  // Early-bird pricing ends before registration does; it is never the deadline.
+  const datesToShow = (Array.isArray(comp.datesToshow) ? comp.datesToshow : [])
+    .filter(d => /registration|regn|apply|application/i.test(d.title || '') && !/early[ -]?bird/i.test(d.title || ''))
+    .map(d => parseDateToYMD(d.important_date || '')).filter(Boolean).sort()[0] || null;
+
+  const registrationDeadline =
+    parseDateToYMD(comp.regnRequirements?.end_regn_dt || '') ||
+    parseDateToYMD(comp.regn_end_date || '') ||
+    titled(/\b(?:registrations?|regn|apply|applications?)\b/i) ||
+    datesToShow ||
+    titled(/\bsubmissions?\b/i) ||
+    earliestEnd(details.filter(d => d.status === 'LIVE')) ||
+    parseDateToYMD(comp.end_date || '');
+
+  // The hackathon itself is the last round on the schedule (the finale),
+  // not comp.start_date, which is when the opportunity opened.
+  const finale = details.reduce((latest, d) =>
+    String(d.start_date || '') > String(latest?.start_date || '') ? d : latest, null);
+
+  return {
+    registrationDeadline,
+    eventConductedDate: parseDateToYMD(finale?.start_date || comp.start_date || comp.starts_at || ''),
+    eventEndDate: parseDateToYMD(comp.end_date || finale?.end_date || comp.ends_at || '')
+  };
+}
+
+/**
  * Scrapes Unstop hackathons across all pagination pages for:
  * https://unstop.com/hackathons?oppstatus=open
  * 
@@ -93,58 +140,7 @@ async function scrapeUnstop() {
         const remainDaysText = comp.regnRequirements?.remain_days ||
           (comp.regnRequirements?.remainingDaysArray ? `${comp.regnRequirements.remainingDaysArray.durations} ${comp.regnRequirements.remainingDaysArray.text}` : null);
 
-        let regClosingDate = null;
-
-        // If a LIVE round (Idea Submission, Screening, Round 1) is active, its end_date is the real deadline
-        if (Array.isArray(comp.rounds)) {
-          for (let r of comp.rounds) {
-            if (Array.isArray(r.details)) {
-              for (let d of r.details) {
-                if (d.status === 'LIVE' && d.end_date) {
-                  const candidate = parseDateToYMD(d.end_date);
-                  if (candidate && (!regClosingDate || candidate < regClosingDate)) {
-                    regClosingDate = candidate;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        // Secondary: regnRequirements.start_regn_dt -> end_regn_dt
-        if (!regClosingDate && comp.regnRequirements?.end_regn_dt) {
-          regClosingDate = parseDateToYMD(comp.regnRequirements.end_regn_dt);
-        }
-
-        // Tertiary: Check rounds with registration / submission titles
-        if (!regClosingDate && Array.isArray(comp.rounds)) {
-          for (let r of comp.rounds) {
-            if (Array.isArray(r.details)) {
-              for (let d of r.details) {
-                const titleLower = `${d.title || ''} ${r.title || ''}`.toLowerCase();
-                if (/registration|regn|apply|application|submission/i.test(titleLower) && d.end_date) {
-                  const candidate = parseDateToYMD(d.end_date);
-                  if (candidate && (!regClosingDate || candidate < regClosingDate)) {
-                    regClosingDate = candidate;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        // Fallback: datesToshow items
-        if (!regClosingDate && Array.isArray(comp.datesToshow)) {
-          const regItem = comp.datesToshow.find(d => /registration|regn|apply|round 1/i.test(d.title));
-          if (regItem?.important_date) {
-            regClosingDate = parseDateToYMD(regItem.important_date);
-          }
-        }
-
-        // Ultimate fallback
-        if (!regClosingDate) {
-          regClosingDate = parseDateToYMD(comp.regn_end_date || comp.end_date);
-        }
+        const { registrationDeadline: regClosingDate, eventConductedDate, eventEndDate } = resolveUnstopDates(comp);
 
         if (!regClosingDate) continue;
 
@@ -196,8 +192,10 @@ async function scrapeUnstop() {
         let h = {
           name: name,
           startDate: regClosingDate,
-          endDate: parseDateToYMD(comp.end_date) || regClosingDate,
+          endDate: eventEndDate || regClosingDate,
           registrationDeadline: regClosingDate,
+          eventConductedDate,
+          eventEndDate,
           location: location,
           mode: mode,
           fee: fee,
@@ -229,4 +227,4 @@ async function scrapeUnstop() {
   return hackathons;
 }
 
-module.exports = { scrapeUnstop };
+module.exports = { scrapeUnstop, resolveUnstopDates };
