@@ -9,6 +9,7 @@ const { discoverViaSearch } = require('./search/discovery');
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
 const { addEventToCalendar, isCalendarConfigured, maintainCalendar } = require('./utils/calendar');
+const { sendDeadlineEmail } = require('./utils/deadlineEmail');
 
 async function run() {
   console.log('Starting Hack Scrapper Run...');
@@ -62,6 +63,8 @@ async function run() {
   } else {
     console.log('No hackathons found during this run.');
   }
+
+  if (isCalendarConfigured()) await sendDeadlineEmail();
 
   console.log('Hack Scrapper run complete.');
 }

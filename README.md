@@ -30,6 +30,9 @@ To run this in your own GitHub repository, add the following under **Settings �
 | `GOOGLE_CALENDAR_ID` | Optional; defaults to `primary` |
 | `TAVILY_API_KEY` | Primary web search provider |
 | `SERP_API_KEY` | Optional backup search provider |
+| `SMTP_HOST`, `SMTP_PORT` | SMTP server used for deadline email |
+| `SMTP_USER`, `SMTP_PASS` | SMTP login; the user is also the sender address |
+| `REPORT_EMAIL` | Address that receives deadline email |
 
 Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled for 06:00 UTC on odd-numbered days of the month. It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
 
@@ -70,3 +73,9 @@ Discovery remains dependent on search indexing, accessible event content, and ru
 Each managed Calendar event is an all-day entry on the last day to submit the registration form, with a one-day duration. The hackathon's event dates remain in its description when available. Kerala events are green (`10`); other online events are blue (`9`), and other allowed offline events are red (`11`). Managed titles use `1 · Kerala · Name` or `2 · Name` to put Kerala first in title-sorted views. Google Calendar does not expose a per-event display-order field, so ordering cannot be guaranteed in every Calendar view.
 
 At the start of each scrape, maintenance scans all Calendar pages, shortens existing managed entries to that one day, and removes reminders whose registration deadline was before today in the calendar's time zone. It reads the `Registration Deadline:` description line, falling back to the entry's start date for older reminders. The scraper also skips expired deadlines during sync, so it cannot add them back. Today's deadlines and personal entries are preserved; recurring entries are left alone. Managed entries are recognized by private metadata or legacy `Mode:` and `Link:` description lines. Events outside the location policy are also removed. Old and prefixed names are matched to avoid duplicate insertion during migration.
+
+## Email reminders
+
+After each Calendar sync, the scraper checks managed Calendar entries for **offline hackathons in Kerala** whose registration deadline is today or within the next three calendar days (using the Calendar's time zone). If one or more qualify, it sends one plain-text email listing only their names, registration deadlines, locations, and links. It sends no email when none qualify. Online events, events outside Kerala, personal entries, and recurring entries are excluded.
+
+Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow. A successful send records the day in the saved discovery state, so further workflow runs that day skip email. If that cache is deleted, the daily send record is lost.

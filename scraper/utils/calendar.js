@@ -30,6 +30,10 @@ function isCalendarConfigured() {
   return Boolean(calendar);
 }
 
+function getCalendarClient() {
+  return calendar;
+}
+
 /**
  * Loads all existing upcoming calendar events into memory for instant duplicate check and date updating
  */
@@ -420,6 +424,7 @@ module.exports = {
   addEventToCalendar,
   clearAllCalendarEvents,
   isCalendarConfigured,
+  getCalendarClient,
   isSouthIndia,
   getEventColorId,
   getColorName
