@@ -44,4 +44,4 @@ function fromCalendar(event) {
     mode: description.match(/^Mode:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     location: description.match(/^Location:[ \t]*(.*)$/m)?.[1]?.trim() || event.location || '' };
 }
-module.exports = { originalName, calendarSummary, isManaged, isRegistrationClosed, isPastEvent, fromCalendar, localDay };
+module.exports = { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };

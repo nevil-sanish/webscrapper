@@ -1,4 +1,4 @@
-const { originalName, calendarSummary, isManaged, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
+const { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
 const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
 const { keralaPriority } = require('./eventPolicy');
@@ -172,9 +172,6 @@ function getColorName(colorId) {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-// A wrong date on one source must not paint a band across the whole calendar.
-const MAX_SPAN_DAYS = 60;
-
 // Accepts YYYY-MM-DD, ISO timestamps and the Date objects deduplication produces.
 function toDay(value) {
   if (value instanceof Date) return isNaN(value.getTime()) ? null : localDay(value);
@@ -187,10 +184,6 @@ function addDays(ymd, count) {
   return d.toISOString().slice(0, 10);
 }
 
-function daysBetween(from, to) {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
-}
-
 // "23 Sep 2026" - unambiguous, unlike the locale-dependent 9/23/2026.
 function formatDay(ymd) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || '');
@@ -198,26 +191,19 @@ function formatDay(ymd) {
 }
 
 /**
- * The entry opens on the registration deadline and can span through the last
- * day of the hackathon, but is only eligible while registration is still open.
- * @returns {{start: string, lastDay: string, end: string}|null} null when registration closed
+ * One all-day entry on the registration deadline, while registration is open.
+ * @returns {{start: string, end: string}|null} null when registration closed
  */
 function calendarWindow(hackathon, now = new Date()) {
   const deadline = toDay(hackathon.registrationDeadline || hackathon.startDate);
   if (!deadline) return null;
   if (deadline < localDay(now)) return null;
 
-  const later = [hackathon.eventEndDate, hackathon.endDate, hackathon.eventConductedDate]
-    .map(toDay).filter(day => day && day > deadline).sort();
-  let lastDay = later[later.length - 1] || deadline;
-  if (daysBetween(deadline, lastDay) > MAX_SPAN_DAYS) lastDay = deadline;
-
-  return { start: deadline, lastDay, end: addDays(lastDay, 1) };
+  return { start: deadline, end: addDays(deadline, 1) };
 }
 
 /**
- * Creates or updates the all-day calendar entry for a hackathon, spanning its
- * registration deadline through the last day of the event.
+ * Creates or updates a one-day all-day entry on the registration deadline.
  * @param {Object} hackathon - The hackathon object
  * @returns {Promise<boolean>} - True if newly added or updated, false if unchanged or skipped
  */
@@ -288,7 +274,7 @@ async function addEventToCalendar(hackathon) {
           location: hackathon.location || 'Online'
         }
       });
-      console.log(`Updated Google Calendar event "${hackathon.name}" (${startDateStr} to ${window.lastDay}, color: ${colorName})`);
+      console.log(`Updated Google Calendar event "${hackathon.name}" (${startDateStr}, color: ${colorName})`);
       existing.start = { date: startDateStr };
       existing.end = { date: nextDayStr };
       existing.summary = summary;
@@ -311,7 +297,7 @@ async function addEventToCalendar(hackathon) {
       date: startDateStr,
     },
     end: {
-      date: nextDayStr, // Exclusive: the entry covers up to and including window.lastDay
+      date: nextDayStr, // Google Calendar's all-day end date is exclusive.
     },
   };
 
@@ -320,7 +306,7 @@ async function addEventToCalendar(hackathon) {
       calendarId: CALENDAR_ID,
       resource: event,
     });
-    console.log(`Event created in Google Calendar for "${hackathon.name}" (${startDateStr} to ${window.lastDay}, color: ${colorName}): ${res.data.htmlLink}`);
+    console.log(`Event created in Google Calendar for "${hackathon.name}" (${startDateStr}, color: ${colorName}): ${res.data.htmlLink}`);
     existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, end: { date: nextDayStr }, colorId, summary, description: desc });
     return true;
   } catch (error) {
@@ -403,9 +389,17 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
       } else {
         const summary = calendarSummary(h);
         const colorId = getEventColorId(h);
-        if (item.summary !== summary || item.colorId !== colorId) {
-          await client.events.patch({ calendarId, eventId: item.id, resource: { summary, colorId,
-            extendedProperties: { private: { ...item.extendedProperties?.private, managedBy: 'hack-scrapper' } } } });
+        const deadline = registrationDeadlineDay(item, timeZone);
+        const datesDiffer = deadline &&
+          (item.start?.date !== deadline || item.end?.date !== addDays(deadline, 1));
+        if (item.summary !== summary || item.colorId !== colorId || datesDiffer) {
+          const resource = { summary, colorId,
+            extendedProperties: { private: { ...item.extendedProperties?.private, managedBy: 'hack-scrapper' } } };
+          if (datesDiffer) {
+            resource.start = { date: deadline };
+            resource.end = { date: addDays(deadline, 1) };
+          }
+          await client.events.patch({ calendarId, eventId: item.id, resource });
           updated++;
         }
       }
@@ -415,7 +409,7 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
     }
   }
   cachedCalendarEventsMap = null;
-  console.log(`Calendar maintenance: ${deleted} removed, ${updated} titles/colors updated.`);
+  console.log(`Calendar maintenance: ${deleted} removed, ${updated} entries updated.`);
   if (failed) throw new Error(`Calendar maintenance failed for ${failed} event(s)`);
   return { deleted, updated };
 }

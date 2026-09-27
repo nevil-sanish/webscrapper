@@ -42,7 +42,8 @@ test('maintenance paginates, deletes closed registrations, recolors upcoming Ker
   const client = { events: {
     async list({ pageToken }) {
       lists++;
-      return { data: pageToken ? { items: [{ id: 'next', summary: 'HackAthena', description,
+      return { data: pageToken ? { items: [{ id: 'next', summary: 'HackAthena',
+        description: `${description}\nRegistration Deadline: 20 Sep 2026`,
         start: { date: '2026-09-18' }, colorId: '11', end: { date: '2026-09-24' } }] } :
         { nextPageToken: 'next', timeZone: 'Asia/Kolkata', items: [
           { id: 'old', summary: 'Old hackathon', description, end: { date: '2026-09-18' } },
@@ -60,6 +61,8 @@ test('maintenance paginates, deletes closed registrations, recolors upcoming Ker
   assert.deepEqual(deletes.map(x => x.eventId), ['old', 'closed', 'legacy']);
   assert.equal(patches[0].resource.colorId, '10');
   assert.equal(patches[0].resource.summary, '1 · Kerala · HackAthena');
+  assert.deepEqual(patches[0].resource.start, { date: '2026-09-20' });
+  assert.deepEqual(patches[0].resource.end, { date: '2026-09-21' });
 });
 test('maintenance reports failed deletes to the GitHub Action', async () => {
   const client = { events: {
