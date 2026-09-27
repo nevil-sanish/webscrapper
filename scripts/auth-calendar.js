@@ -48,8 +48,6 @@ async function authenticate() {
           server.destroy();
           
           const code = qs.get('code');
-          console.log(`\nAuthorization Code Received: ${code}\n`);
-          
           const { tokens } = await oauth2Client.getToken(code);
           oauth2Client.credentials = tokens;
           resolve(tokens);
@@ -69,8 +67,7 @@ async function authenticate() {
 
 authenticate().then((tokens) => {
   console.log('\n=======================================');
-  console.log('SUCCESS! Google Calendar Refresh Token obtained:');
-  console.log(tokens.refresh_token);
+  console.log('Google Calendar authorization completed.');
   console.log('=======================================\n');
 
   if (tokens.refresh_token) {
