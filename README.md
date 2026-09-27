@@ -30,7 +30,7 @@ Discovery remains dependent on search indexing, accessible event content, and ru
 
 Kerala events are green (`10`); other online events are blue (`9`), and other allowed offline events are red (`11`). Managed titles use `1 · Kerala · Name` or `2 · Name` to put Kerala first in title-sorted views. Google Calendar does not expose a per-event display-order field, so ordering cannot be guaranteed in every Calendar view.
 
-At the start of each scrape, maintenance scans all Calendar pages, removes scraper-created reminders that ended before today, and updates retained managed events' colors/titles. For an all-day event, Google's exclusive end date at today's midnight means the event finished yesterday. Today's events and personal entries are preserved; recurring entries are left alone. Managed entries are recognized by private metadata or legacy `Mode:` and `Link:` description lines. Events outside the location policy are also removed. Old and prefixed names are matched to avoid duplicate insertion during migration.
+At the start of each scrape, maintenance scans all Calendar pages and removes scraper-created reminders whose registration deadline was before today in the calendar's time zone. It reads the `Registration Deadline:` description line, falling back to the entry's start date for older reminders. The scraper also skips expired deadlines during sync, so it cannot add them back. Today's deadlines and personal entries are preserved; recurring entries are left alone. Managed entries are recognized by private metadata or legacy `Mode:` and `Link:` description lines. Events outside the location policy are also removed. Old and prefixed names are matched to avoid duplicate insertion during migration.
 
 ## Configuration and verification
 

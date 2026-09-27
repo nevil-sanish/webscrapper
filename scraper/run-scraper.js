@@ -66,4 +66,7 @@ async function run() {
   console.log('Hack Scrapper run complete.');
 }
 
-run().catch(console.error);
+run().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

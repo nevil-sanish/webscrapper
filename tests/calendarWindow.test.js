@@ -11,10 +11,14 @@ test('the entry spans the registration deadline through the last day of the even
   }, now), { start: '2026-09-23', lastDay: '2026-10-03', end: '2026-10-04' });
 });
 
-test('a hackathon still running keeps its entry after registration has closed', () => {
-  assert.deepEqual(calendarWindow({
+test('a hackathon is skipped after registration closes, even if the event is still running', () => {
+  assert.equal(calendarWindow({
     startDate: '2026-09-19', eventConductedDate: '2026-09-24', eventEndDate: '2026-09-25'
-  }, now), { start: '2026-09-19', lastDay: '2026-09-25', end: '2026-09-26' });
+  }, now), null);
+  assert.equal(calendarWindow({
+    startDate: '2026-09-19', registrationDeadline: '2026-09-19',
+    eventConductedDate: '2026-09-24', eventEndDate: '2026-09-25'
+  }, now), null);
 });
 
 test('an event that finished is dropped, and a deadline with no event dates stays single-day', () => {

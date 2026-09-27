@@ -1,4 +1,4 @@
-const { originalName, calendarSummary, isManaged, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
+const { originalName, calendarSummary, isManaged, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
 const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
 const { keralaPriority } = require('./eventPolicy');
@@ -198,23 +198,20 @@ function formatDay(ymd) {
 }
 
 /**
- * The entry opens on the registration deadline and runs through the last day
- * of the hackathon itself. A hackathon whose registration closed days before
- * it is conducted then stays visible while it is still running, instead of
- * looking finished on its deadline, and maintenance only clears it once the
- * event is genuinely over.
- * @returns {{start: string, lastDay: string, end: string}|null} null when the whole event is past
+ * The entry opens on the registration deadline and can span through the last
+ * day of the hackathon, but is only eligible while registration is still open.
+ * @returns {{start: string, lastDay: string, end: string}|null} null when registration closed
  */
 function calendarWindow(hackathon, now = new Date()) {
-  const deadline = toDay(hackathon.startDate || hackathon.registrationDeadline);
+  const deadline = toDay(hackathon.registrationDeadline || hackathon.startDate);
   if (!deadline) return null;
+  if (deadline < localDay(now)) return null;
 
   const later = [hackathon.eventEndDate, hackathon.endDate, hackathon.eventConductedDate]
     .map(toDay).filter(day => day && day > deadline).sort();
   let lastDay = later[later.length - 1] || deadline;
   if (daysBetween(deadline, lastDay) > MAX_SPAN_DAYS) lastDay = deadline;
 
-  if (lastDay < localDay(now)) return null;
   return { start: deadline, lastDay, end: addDays(lastDay, 1) };
 }
 
@@ -392,10 +389,12 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
   } while (pageToken);
   let deleted = 0;
   let updated = 0;
+  let failed = 0;
   for (const item of items) {
     if (!isManaged(item) || item.recurrence || item.recurringEventId) continue;
     const h = fromCalendar(item);
-    const reason = isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' : null);
+    const reason = isRegistrationClosed(item, now, timeZone) ? 'registration closed' :
+      (isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' : null));
     try {
       if (reason) {
         await client.events.delete({ calendarId, eventId: item.id });
@@ -410,10 +409,14 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
           updated++;
         }
       }
-    } catch (error) { console.error(`Calendar maintenance failed for ${h.name}: ${error.code || error.name}`); }
+    } catch (error) {
+      failed++;
+      console.error(`Calendar maintenance failed for ${h.name}: ${error.code || error.name}`);
+    }
   }
   cachedCalendarEventsMap = null;
   console.log(`Calendar maintenance: ${deleted} removed, ${updated} titles/colors updated.`);
+  if (failed) throw new Error(`Calendar maintenance failed for ${failed} event(s)`);
   return { deleted, updated };
 }
 
