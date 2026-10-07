@@ -58,7 +58,7 @@ The crawler ranks candidates, follows up to two link levels, checks three pages 
 
 Web discovery avoids revisiting Unstop, Devfolio, and Devpost pages during a complete scrape, since their dedicated scrapers already traverse open listings. Unstop results are additionally checked for hackathon content to exclude quizzes, hiring tests, CTFs, and unrelated coding challenges.
 
-Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. A Devpost event needs a displayed positive cash prize. Online events are kept; in-person events need a location in Kerala, Tamil Nadu, or Karnataka. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped.
+**Devpost is currently switched off in `scraper/run-scraper.js`.** When enabled, Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. A Devpost event needs a displayed positive cash prize. Online events are kept; in-person events need a location in Kerala, Tamil Nadu, or Karnataka. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped.
 
 Tavily uses basic search with automatic parameter selection disabled. SerpApi is used only when Tavily is unavailable or fails; empty successful results do not consume backup requests. Successful queries are cached for three days. Persistent monthly attempt budgets default to 900 Tavily and 80 SerpApi requests; failures are conservatively counted. These are local counters, not provider account usage measurements. Separate local/CI machines or lost caches cannot enforce an account-wide limit; provider billing limits still apply.
 
@@ -66,6 +66,7 @@ GitHub Actions restores/saves discovery state, serializes scraper runs, and uplo
 
 ## Event eligibility
 
+- Online hackathons with a registration fee are left out; offline ones may charge.
 - Keep online hackathons without requiring prizes from other sources; Devpost entries require a displayed positive cash prize.
 - Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline.
 - Inspect full event descriptions and round content before truncating summaries.

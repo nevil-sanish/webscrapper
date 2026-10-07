@@ -57,10 +57,11 @@ function classifyAttendance(event, content = '') {
     (!isGeneric(location) && !declaredOnline);
   const venueLines = lines.filter(line => /\b(?:venue|location|held at|held in|takes place at)\b/i.test(line));
   // A physical-round venue overrides an online label, where the listed place
-  // is only the organizer's address. A venue the source states for an event it
-  // lists as in-person is kept, and a sentence is used only when it names a
-  // real place: "held in teams of four" is not a venue.
-  const roundVenueLine = (declaredOnline || isGeneric(location)) &&
+  // is only the organizer's address, and a stated place too small to recognise
+  // (Devfolio's "Myladi, India"). A recognisable venue the source states for an
+  // in-person event is kept, and a sentence is used only when it names a real
+  // place: "held in teams of four" is not a venue.
+  const roundVenueLine = (declaredOnline || isGeneric(location) || !matches(location, KNOWN_PLACES)) &&
     evidence.find(line => /\b(?:at|in|venue|location)\b/i.test(line) && matches(line, KNOWN_PLACES));
   const roundVenue = roundVenueLine ? roundVenueLine.replace(/^.*?\b(?:held at|held in|venue\s*:?|location\s*:?|at|in)\s+/i, '') : '';
   const namedVenue = matches(roundVenue, KNOWN_PLACES) ? roundVenue : (roundVenueLine || '');
@@ -86,9 +87,13 @@ function classifyAttendance(event, content = '') {
     isKeralaRelevant: matches(resolvedLocation, KERALA_PLACES) };
 }
 
+// "Free", "₹0" and a missing fee are free; "Paid" or any positive amount is not.
+const isPaid = fee => /paid/i.test(fee || '') || Number(String(fee || '').replace(/[^\d.]/g, '')) > 0;
+
 function shouldKeepHackathon(event) {
   const h = classifyAttendance(event);
-  if (h.mode === 'online') return true;
+  // An online hackathon that charges to register is not worth a reminder.
+  if (h.mode === 'online') return !isPaid(h.fee);
   if (h.mode !== 'offline' || isGeneric(h.location)) return false;
   // Explicit excluded states take precedence over a matching city or organizer name.
   if (matches(h.location, EXCLUDED_PLACES)) return false;

@@ -1,27 +1,31 @@
 const { classifyAttendance, shouldKeepHackathon, keralaPriority } = require('./utils/eventPolicy');
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
-const { scrapeDevpost } = require('./sites/devpost');
 const { discoverViaSearch } = require('./search/discovery');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
-const { addEventToCalendar, isCalendarConfigured, maintainCalendar } = require('./utils/calendar');
+const { addEventToCalendar, isCalendarConfigured, maintainCalendar, formatDay } = require('./utils/calendar');
+const { localDay } = require('./utils/calendarPolicy');
 const { sendDeadlineEmail } = require('./utils/deadlineEmail');
 
 // Anything that could have cost a hackathon is collected here and fails the
 // run at the end, after everything that did work has been synced. A run that
 // looks green must mean every source was read in full.
 const problems = [];
+const sourceStats = [];
 
 // One source failing must not take the others down with it.
 async function collect(name, scrape, { expectResults = true } = {}) {
   try {
     const events = await scrape();
     const stats = events.stats;
+    if (stats) sourceStats.push(stats);
     if (stats && !stats.complete) {
       problems.push(`${name}: scan incomplete (${stats.note || `${stats.failedPages || 0} listing page(s), ${stats.failedDetails || 0} event page(s) failed`})`);
     } else if (expectResults && events.length === 0) {
@@ -33,6 +37,31 @@ async function collect(name, scrape, { expectResults = true } = {}) {
     console.error(`${name} failed:`, error.message);
     return [];
   }
+}
+
+// One line per listing, so a run can be checked against the platform by hand:
+// what each source said it had, what was read, and what happened to each one.
+function writeScrapeReport(events) {
+  const day = value => formatDay(value instanceof Date ? localDay(value) : String(value || '').slice(0, 10));
+  const cell = value => String(value ?? '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
+  const lines = [`# Scrape report - ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`, ''];
+  for (const stats of sourceStats) {
+    lines.push(`- **${stats.source}**: platform reports ${stats.reported ?? '?'} open listings, ${stats.listed} read, ` +
+      `${(stats.skippedItems || []).length} skipped, ${stats.failedPages || 0} listing page(s) and ${stats.failedDetails || 0} event page(s) failed`);
+  }
+  lines.push('', '| Source | Hackathon | Deadline | Result | Why | Link |', '|---|---|---|---|---|---|');
+  for (const h of events) {
+    const kept = shouldKeepHackathon(h);
+    lines.push(`| ${h.source} | ${cell(h.name)} | ${day(h.registrationDeadline || h.startDate)} | ${kept ? 'IN CALENDAR' : 'left out'} | ` +
+      `${kept ? '' : (h.mode === 'online' ? `online with registration fee ${cell(h.fee)}` : `${h.mode}, venue "${cell(h.location).slice(0, 60)}" is not in Kerala/Tamil Nadu/Karnataka`)} | ${h.sourceUrl} |`);
+  }
+  for (const stats of sourceStats) {
+    for (const item of stats.skippedItems || []) {
+      lines.push(`| ${stats.source} | ${cell(item.name)} | | skipped | ${item.reason} | ${item.url} |`);
+    }
+  }
+  fs.writeFileSync(path.join(__dirname, 'scrapeReport.md'), lines.join('\n') + '\n');
+  console.log('Per-listing report: scraper/scrapeReport.md');
 }
 
 async function run() {
@@ -59,9 +88,9 @@ async function run() {
     ...await collect('Devfolio', scrapeDevfolio),
     // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open)
     ...await collect('Unstop', scrapeUnstop),
-    // 3. Scan every Devpost public open/upcoming listing page.
-    ...await collect('Devpost', scrapeDevpost),
-    // 4. Google Search Discovery (Kerala-first, up to 10 results per query)
+    // Devpost (scrapeDevpost) is switched off at the owner's request; its
+    // pages also stay out of web discovery below.
+    // 3. Google Search Discovery (Kerala-first, up to 10 results per query)
     ...await collect('Web discovery', () => discoverViaSearch({ platformsCovered: true }), { expectResults: false })
   ];
 
@@ -79,6 +108,7 @@ async function run() {
       .sort((a, b) => keralaPriority(b) - keralaPriority(a));
 
     console.log(`Kept ${filteredHackathons.length} hackathons after filtering rules.`);
+    writeScrapeReport(uniqueHackathons.map(h => classifyAttendance(h)));
 
     if (calendarReady) {
       console.log('Syncing hackathons with Google Calendar...');

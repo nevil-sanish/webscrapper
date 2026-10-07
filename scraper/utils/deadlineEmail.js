@@ -1,7 +1,7 @@
 const nodemailer = require('nodemailer');
 const { classifyAttendance, keralaPriority, shouldKeepHackathon } = require('./eventPolicy');
 const { isManaged, registrationDeadlineDay, fromCalendar, localDay } = require('./calendarPolicy');
-const { getCalendarClient } = require('./calendar');
+const { getCalendarClient, formatDay } = require('./calendar');
 const { loadState } = require('../search/state');
 
 function addDays(day, count) {
@@ -49,13 +49,12 @@ async function sendDeadlineEmail({
 
   const items = [];
   let pageToken;
-  let timeZone = 'Asia/Kolkata';
+  const timeZone = 'Asia/Kolkata';
   do {
     const res = await calendarClient.events.list({
       calendarId: env.GOOGLE_CALENDAR_ID || 'primary', maxResults: 2500, pageToken, showDeleted: false
     });
     items.push(...(res.data.items || []));
-    timeZone = res.data.timeZone || timeZone;
     pageToken = res.data.nextPageToken;
   } while (pageToken);
 
@@ -77,7 +76,7 @@ async function sendDeadlineEmail({
   });
   const lines = events.flatMap(event => [
     event.name,
-    `Registration deadline: ${event.deadline}`,
+    `Registration deadline: ${formatDay(event.deadline)}`,
     `Location: ${event.location}`,
     ...(event.url ? [`Link: ${event.url}`] : []),
     ''

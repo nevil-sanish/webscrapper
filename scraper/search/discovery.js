@@ -10,6 +10,7 @@ const { canonicalUrl, isSocial, scoreCandidate, pageKind, needsBrowser, eventLin
 const { parseExactHackathonPage } = require('../utils/pageParser');
 const { shouldKeepHackathon, keralaPriority } = require('../utils/eventPolicy');
 const { isHackathon } = require('../utils/hackathonType');
+const { localDay } = require('../utils/calendarPolicy');
 require('dotenv').config();
 const positiveLimit = (value, fallback) => Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : fallback;
 
@@ -52,7 +53,7 @@ async function discoverViaSearch(options = {}) {
   }
   for (const seed of options.seeds || seeds) add({ ...seed, origin: 'seed' }, true);
   for (const [url, page] of Object.entries(state.data.pages)) {
-    if (now.getTime() - page.seenAt < 90 * 86400000 && (!page.deadline || page.deadline >= now.toISOString().slice(0, 10))) {
+    if (now.getTime() - page.seenAt < 90 * 86400000 && (!page.deadline || page.deadline >= localDay(now))) {
       add({ url, title: page.title, origin: 'remembered' }, true);
     }
   }

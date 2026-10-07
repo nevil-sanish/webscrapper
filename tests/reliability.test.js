@@ -144,10 +144,57 @@ test('a page that keeps failing is reported and does not end the scan', async ()
   try {
     const results = await scrapeUnstop({ retryDelayMs: 0 });
     assert.deepEqual(results.map(h => h.name), ['Hackathon 1']);
-    assert.deepEqual({ ...results.stats, skipped: undefined },
-      { source: 'unstop', listed: 2, failedPages: 1, failedDetails: 1, skipped: undefined, complete: false });
+    const { listed, failedPages, failedDetails, complete } = results.stats;
+    assert.deepEqual({ listed, failedPages, failedDetails, complete },
+      { listed: 2, failedPages: 1, failedDetails: 1, complete: false });
   } finally {
     axios.get = originalGet;
     console.error = originalError;
   }
+});
+
+test('a legacy US-format deadline in a calendar entry is read month first', () => {
+  const { registrationDeadlineDay } = require('../scraper/utils/calendarPolicy');
+  assert.equal(registrationDeadlineDay({ description: 'Mode: offline\nRegistration Deadline: 11/10/2026\n' }), '2026-11-10');
+  assert.equal(registrationDeadlineDay({ description: 'Registration Deadline: 10 Nov 2026\n' }), '2026-11-10');
+});
+
+test('a venue too small to recognise is resolved from the description', () => {
+  const event = classifyAttendance({ mode: 'offline', location: 'Myladi, India' },
+    'The 24-hour offline hackathon at Amal College of Advanced Studies, Nilambur, Kerala.');
+  assert.match(event.location, /Nilambur, Kerala/);
+  assert.equal(shouldKeepHackathon(event), true);
+});
+
+test('online hackathons that charge a registration fee are left out', () => {
+  const { fromCalendar } = require('../scraper/utils/calendarPolicy');
+  for (const fee of ['₹500', 'Rs. 1,500', 'Paid', '200']) {
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee }), false, fee);
+  }
+  for (const fee of ['Free', '₹0', '', null, undefined]) {
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee }), true, String(fee));
+  }
+  // An offline event in an allowed state may charge.
+  assert.equal(shouldKeepHackathon({ mode: 'offline', location: 'Kochi, Kerala', fee: '₹500' }), true);
+  // Maintenance sees the fee of an entry already in the calendar.
+  const stored = fromCalendar({ summary: '2 · Paid Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nRegistration Fee: ₹299\n' });
+  assert.equal(shouldKeepHackathon(stored), false);
+});
+
+test('numeric dates are read the Indian way, day first', () => {
+  const { parseDateToYMD } = require('../scraper/utils/pageParser');
+  assert.equal(parseDateToYMD('11/10/2026'), '2026-10-11');
+  assert.equal(parseDateToYMD('5/11/2026'), '2026-11-05');
+  assert.equal(parseDateToYMD('05-11-2026'), '2026-11-05');
+  assert.equal(parseDateToYMD('Register by 5.11.2026'), '2026-11-05');
+  // Month 24 does not exist: refused, never flipped to the American reading.
+  assert.equal(parseDateToYMD('10/24/2026'), null);
+});
+
+test('a timestamp without an offset keeps its own day on any machine', () => {
+  const { parseDateToYMD } = require('../scraper/utils/pageParser');
+  assert.equal(parseDateToYMD('2026-10-15T23:30'), '2026-10-15');
+  assert.equal(parseDateToYMD('2026-10-15T00:10:00'), '2026-10-15');
+  assert.equal(parseDateToYMD('2026-11-10T18:29:00+00:00'), '2026-11-10');
+  assert.equal(parseDateToYMD('2026-11-10T18:31:00Z'), '2026-11-11');
 });

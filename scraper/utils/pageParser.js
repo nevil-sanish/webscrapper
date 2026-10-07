@@ -36,6 +36,9 @@ function parseDateToYMD(dateStr) {
 
   // 0. Full timestamp: resolve it in the event timezone before taking the day
   if (/^20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(clean)) {
+    // A timestamp with no offset is already Indian wall-clock time. Parsing it
+    // would apply the machine's zone (UTC on CI) and can shift the day.
+    if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(clean)) return clean.slice(0, 10);
     const stamp = new Date(clean.replace(' ', 'T'));
     if (!isNaN(stamp.getTime())) return dayInEventZone.format(stamp);
   }
@@ -66,11 +69,15 @@ function parseDateToYMD(dateStr) {
     }
   }
 
-  // 4. DD/MM/YYYY or DD-MM-YYYY
-  const numDmyMatch = clean.match(/\b(0[1-9]|[12]\d|3[01])[-/.](0[1-9]|1[0-2])[-/.](20\d{2})\b/);
+  // 4. Numeric dates are Indian: day first, with or without leading zeros
+  //    (5/11/2026 is 5 November). Left to JavaScript, they would be read the
+  //    American way, month first.
+  const numDmyMatch = clean.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
   if (numDmyMatch) {
-    return `${numDmyMatch[3]}-${numDmyMatch[2]}-${numDmyMatch[1]}`;
+    return `${numDmyMatch[3]}-${numDmyMatch[2].padStart(2, '0')}-${numDmyMatch[1].padStart(2, '0')}`;
   }
+  // A numeric date that is not a valid day/month is refused rather than guessed.
+  if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(clean)) return null;
 
   // 5. JavaScript Date fallback
   const d = new Date(clean);

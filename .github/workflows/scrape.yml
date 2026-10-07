@@ -41,6 +41,7 @@ jobs:
 
     - name: Run Hackathon Scraper & Sync Calendar
       env:
+        TZ: Asia/Kolkata
         TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
         GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID || secrets.GOOGLE_SEARCH_CLIENT_ID }}
@@ -68,5 +69,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: discovery-report
-        path: scraper/search/discoveryReport.json
+        path: |
+          scraper/search/discoveryReport.json
+          scraper/scrapeReport.md
         if-no-files-found: ignore

@@ -397,11 +397,11 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
   if (!client) return { deleted: 0, updated: 0 };
   const items = [];
   let pageToken;
-  let timeZone = 'Asia/Kolkata';
+  // Deadlines are Indian dates whatever zone the calendar or machine is set to.
+  const timeZone = 'Asia/Kolkata';
   do {
     const res = await client.events.list({ calendarId, maxResults: 2500, pageToken, showDeleted: false });
     items.push(...(res.data.items || []));
-    timeZone = res.data.timeZone || timeZone;
     pageToken = res.data.nextPageToken;
   } while (pageToken);
   let deleted = 0;
@@ -448,6 +448,7 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
 module.exports = {
   maintainCalendar,
   calendarWindow,
+  formatDay,
   addEventToCalendar,
   clearAllCalendarEvents,
   isCalendarConfigured,

@@ -171,7 +171,7 @@ const REQUEST = {
 async function scrapeUnstop({ retryDelayMs = 1000 } = {}) {
   console.log('Scraping Unstop (https://unstop.com/hackathons?oppstatus=open)...');
   const hackathons = [];
-  const stats = { source: 'unstop', listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, complete: false };
+  const stats = { source: 'unstop', reported: null, listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, skippedItems: [], complete: false };
   hackathons.stats = stats;
   const retry = { delayMs: retryDelayMs };
 
@@ -192,6 +192,7 @@ async function scrapeUnstop({ retryDelayMs = 1000 } = {}) {
       continue;
     }
 
+    if (Number.isInteger(res.data?.data?.total)) stats.reported = res.data.data.total;
     const reportedLastPage = Number(res.data?.data?.last_page);
     if (Number.isInteger(reportedLastPage) && reportedLastPage > 0) {
       lastPage = Math.max(lastPage || 0, reportedLastPage);
@@ -215,9 +216,13 @@ async function scrapeUnstop({ retryDelayMs = 1000 } = {}) {
   for (const id of opportunityIds) {
     try {
       const detailRes = await getWithRetry(`https://unstop.com/api/public/competition/${id}`, REQUEST, retry);
-      const result = parseUnstopCompetition(detailRes.data?.data?.competition, { id, today });
+      const comp = detailRes.data?.data?.competition;
+      const result = parseUnstopCompetition(comp, { id, today });
       if (result.event) hackathons.push(result.event);
-      else stats.skipped[result.skipped] = (stats.skipped[result.skipped] || 0) + 1;
+      else {
+        stats.skipped[result.skipped] = (stats.skipped[result.skipped] || 0) + 1;
+        stats.skippedItems.push({ name: comp?.title || `#${id}`, url: comp ? sourceLink(comp, id) : `https://unstop.com/hackathons/${id}`, reason: result.skipped });
+      }
     } catch (detailErr) {
       stats.failedDetails++;
       console.error(`Unstop competition ${id} failed: ${detailErr.response?.status || detailErr.code || detailErr.message}`);

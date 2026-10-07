@@ -11,6 +11,10 @@ function localDay(date, timeZone = 'Asia/Kolkata') {
 }
 function registrationDeadlineDay(event, timeZone = 'Asia/Kolkata') {
   const described = (event.description || '').match(/^Registration Deadline:[ \t]*(.+)$/mi)?.[1];
+  // Entries written before dates were spelled out used US month/day/year,
+  // which the general parser would read as day/month: 11/10 is 10 November.
+  const us = described?.trim().match(/^(\d{1,2})\/(\d{1,2})\/(20\d{2})$/);
+  if (us) return `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
   const parsed = described && parseDateToYMD(described);
   if (parsed) return parsed;
   // Older scraper entries started on the registration deadline but may not
@@ -42,6 +46,7 @@ function fromCalendar(event) {
   const description = event.description || '';
   return { name: originalName(event.summary || ''), description,
     mode: description.match(/^Mode:[ \t]*(.*)$/m)?.[1]?.trim() || '',
+    fee: description.match(/^Registration Fee:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     location: description.match(/^Location:[ \t]*(.*)$/m)?.[1]?.trim() || event.location || '' };
 }
 module.exports = { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };

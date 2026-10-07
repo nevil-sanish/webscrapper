@@ -31,7 +31,7 @@ function resolveRegistrationDeadline({ timerTimestamp, bodyText, now = new Date(
 async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
   console.log('Scraping Devfolio (https://devfolio.co/hackathons/open)...');
   const hackathons = [];
-  const stats = { source: 'devfolio', listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, complete: false };
+  const stats = { source: 'devfolio', reported: null, listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, skippedItems: [], complete: false };
   hackathons.stats = stats;
   const retry = { delayMs: retryDelayMs };
 
@@ -71,6 +71,7 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
       const hits = response.data?.hits?.hits || [];
       const reportedTotal = Number(response.data?.hits?.total?.value);
       if (Number.isInteger(reportedTotal) && reportedTotal > 0) {
+        stats.reported = reportedTotal;
         totalPages = Math.max(totalPages || 0, Math.ceil(reportedTotal / size));
       }
 
@@ -187,6 +188,7 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
         // Filter: Must have a valid registration closing date that is today or in the future
         if (!regEndDate || regEndDate < todayYMD) {
           stats.skipped['no-open-registration-deadline'] = (stats.skipped['no-open-registration-deadline'] || 0) + 1;
+          stats.skippedItems.push({ name, url: exactUrl, reason: 'no-open-registration-deadline' });
           continue;
         }
 

@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const { localDay } = require('../utils/calendarPolicy');
 
 function loadState(file = path.join(__dirname, 'discoveryState.json'), now = new Date()) {
   let data = {};
   try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* First run. */ }
-  const month = now.toISOString().slice(0, 7);
+  const month = localDay(now).slice(0, 7);
   data.queries ||= {};
   data.pages ||= {};
   if (data.month !== month) { data.month = month; data.usage = {}; }
