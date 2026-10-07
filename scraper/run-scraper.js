@@ -6,7 +6,6 @@ const path = require('path');
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
-const { discoverViaSearch } = require('./search/discovery');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
@@ -88,10 +87,8 @@ async function run() {
     ...await collect('Devfolio', scrapeDevfolio),
     // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open)
     ...await collect('Unstop', scrapeUnstop),
-    // Devpost (scrapeDevpost) is switched off at the owner's request; its
-    // pages also stay out of web discovery below.
-    // 3. Google Search Discovery (Kerala-first, up to 10 results per query)
-    ...await collect('Web discovery', () => discoverViaSearch({ platformsCovered: true }), { expectResults: false })
+    // Devpost (sites/devpost.js) and web search discovery (search/discovery.js)
+    // are switched off at the owner's request: only Devfolio and Unstop run.
   ];
 
   console.log(`\nTotal scraped/extracted: ${allNewHackathons.length}`);

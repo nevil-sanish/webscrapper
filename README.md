@@ -1,6 +1,8 @@
 # Hack Scrapper
 
-Discovers hackathons through Devfolio, Unstop, Devpost, and Tavily (SerpApi backup), then syncs registration reminders to Google Calendar.
+Discovers hackathons through Devfolio and Unstop, then syncs registration reminders to Google Calendar.
+
+> Devpost and web search discovery are currently switched off in `scraper/run-scraper.js`. The sections describing them below apply only if they are re-enabled.
 
 ## Quick start
 
