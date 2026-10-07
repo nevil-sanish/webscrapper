@@ -102,10 +102,7 @@ function parseCountdownToDate(text) {
     const minutes = parseInt(colonMatch[3], 10) || 0;
     const msToAdd = (days * 24 * 60 + hours * 60 + minutes) * 60 * 1000;
     const target = new Date(Date.now() + msToAdd);
-    const y = target.getFullYear();
-    const m = String(target.getMonth() + 1).padStart(2, '0');
-    const d = String(target.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return dayInEventZone.format(target);
   }
 
   // Format 2: "11d 4h" or "11 days 4 hours" or "11d left" or "11 days left"
@@ -115,10 +112,7 @@ function parseCountdownToDate(text) {
     const hours = parseInt(generalMatch[2], 10) || 0;
     const msToAdd = (days * 24 + hours) * 60 * 60 * 1000;
     const target = new Date(Date.now() + msToAdd);
-    const y = target.getFullYear();
-    const m = String(target.getMonth() + 1).padStart(2, '0');
-    const d = String(target.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return dayInEventZone.format(target);
   }
 
   // Format 3: "hours left" (within 24 hours) -> today or tomorrow
@@ -126,10 +120,7 @@ function parseCountdownToDate(text) {
   if (hoursOnlyMatch) {
     const hours = parseInt(hoursOnlyMatch[1], 10);
     const target = new Date(Date.now() + hours * 60 * 60 * 1000);
-    const y = target.getFullYear();
-    const m = String(target.getMonth() + 1).padStart(2, '0');
-    const d = String(target.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return dayInEventZone.format(target);
   }
 
   return null;
@@ -347,8 +338,7 @@ function parseExactHackathonPage(html, pageUrl, options = {}) {
   }
 
   const now = options.now || new Date();
-  const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  if (registrationEndDate < todayYMD) {
+  if (registrationEndDate < dayInEventZone.format(now)) {
     if (options.diagnostics) options.diagnostics.reason = 'expired-registration-deadline';
     return null;
   }

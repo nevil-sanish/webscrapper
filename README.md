@@ -1,12 +1,12 @@
 # Hack Scrapper
 
-Discovers hackathons through Devfolio, Unstop, and Tavily (SerpApi backup), then syncs registration reminders to Google Calendar.
+Discovers hackathons through Devfolio, Unstop, Devpost, and Tavily (SerpApi backup), then syncs registration reminders to Google Calendar.
 
 ## Quick start
 
 1. Clone or fork this repository and enter its directory. Install Node.js 20 or later, then run `npm ci` and `npx playwright install chromium`. On Linux, use `npx playwright install --with-deps chromium` if browser system libraries are missing.
 2. Copy `.env.example` to `.env`. This file is ignored by Git; keep your credentials there and never commit it.
-3. Add a `TAVILY_API_KEY` for web search, or a `SERP_API_KEY` as a backup. Devfolio and Unstop scraping can still run without search keys, but web discovery will be limited.
+3. Add a `TAVILY_API_KEY` for web search, or a `SERP_API_KEY` as a backup. Devfolio, Unstop, and Devpost scraping can still run without search keys, but web discovery will be limited.
 4. Configure Google Calendar using the steps below, then run `npm run scrape`.
 
 ### Google Calendar authorization
@@ -15,6 +15,10 @@ Discovers hackathons through Devfolio, Unstop, and Tavily (SerpApi backup), then
 2. Under **Google Auth Platform → Clients**, create an OAuth client of type **Web application**. Add `http://localhost:3000/oauth2callback` to its **Authorized redirect URIs**. Copy its client ID and client secret into `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET` in `.env`. An API key is a different credential and cannot authorize Calendar access. Google may show a new client secret only when it is created, so save it securely.
 3. Run `npm run auth:calendar` on the same computer as your browser. Open the URL it prints, choose the Google account whose Calendar should be managed, and approve access. The helper writes `GOOGLE_CALENDAR_REFRESH_TOKEN` to `.env` without printing it. If the consent screen is in Testing mode, add that Google account as a test user.
 4. By default, the scraper uses the selected account's `primary` calendar. Set `GOOGLE_CALENDAR_ID` in `.env` to use another calendar that account can edit.
+
+**Service account (recommended for unattended runs).** Instead of the OAuth values, create a service account in the Google Cloud project, download a JSON key, and share the calendar with the service account's email using *Make changes to events*. Put the key JSON on one line in `GOOGLE_SERVICE_ACCOUNT_KEY` and set `GOOGLE_CALENDAR_ID` to the shared calendar's ID (for a main calendar, the account's email address). The key does not expire and needs no consent screen. When it is set it takes precedence over the refresh token.
+
+Refresh tokens issued while the OAuth consent screen is in **Testing** expire after seven days. In Google Cloud Console, open *Google Auth Platform → Audience* and choose **Publish app** (status "In production") before running `npm run auth:calendar`, otherwise syncing stops a week later with `invalid_grant`. After re-authorizing, copy the new `GOOGLE_CALENDAR_REFRESH_TOKEN` into the GitHub repository secret as well as `.env`.
 
 The scraper needs all three `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, and `GOOGLE_CALENDAR_REFRESH_TOKEN` values to sync. If Calendar is not configured, scraping still runs but no events are synced. If Google reports `invalid_grant` or says the token expired or was revoked, run `npm run auth:calendar` again and replace the stored refresh token. Google's [OAuth documentation](https://developers.google.com/identity/protocols/oauth2) says refresh tokens for an external consent screen in Testing mode expire after seven days (except for basic identity scopes); this scraper requests Calendar access.
 
@@ -52,7 +56,9 @@ Search results retain titles and snippets so unrelated court records, registrati
 
 The crawler ranks candidates, follows up to two link levels, checks three pages concurrently, and limits work to 80 pages per run (with per-host limits). The report records accepted events, rejection reasons, and deferred URLs. JavaScript-only pages are rendered according to visible content or parse failure rather than HTML file size. Known event URLs are revisited without searching for them again. Seed sources in `scraper/search/sources.js` include the user-supplied HackAthena site and Kerala college/IEDC event listings; seeds must pass the same validation.
 
-Web discovery avoids revisiting Unstop and Devfolio pages during a complete scrape, since their dedicated scrapers already traverse open listings. Unstop results are additionally checked for hackathon content to exclude quizzes, hiring tests, CTFs, and unrelated coding challenges.
+Web discovery avoids revisiting Unstop, Devfolio, and Devpost pages during a complete scrape, since their dedicated scrapers already traverse open listings. Unstop results are additionally checked for hackathon content to exclude quizzes, hiring tests, CTFs, and unrelated coding challenges.
+
+Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. A Devpost event needs a displayed positive cash prize. Online events are kept; in-person events need a location in Kerala, Tamil Nadu, or Karnataka. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped.
 
 Tavily uses basic search with automatic parameter selection disabled. SerpApi is used only when Tavily is unavailable or fails; empty successful results do not consume backup requests. Successful queries are cached for three days. Persistent monthly attempt budgets default to 900 Tavily and 80 SerpApi requests; failures are conservatively counted. These are local counters, not provider account usage measurements. Separate local/CI machines or lost caches cannot enforce an account-wide limit; provider billing limits still apply.
 
@@ -60,7 +66,7 @@ GitHub Actions restores/saves discovery state, serializes scraper runs, and uplo
 
 ## Event eligibility
 
-- Keep online hackathons without requiring prizes.
+- Keep online hackathons without requiring prizes from other sources; Devpost entries require a displayed positive cash prize.
 - Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline.
 - Inspect full event descriptions and round content before truncating summaries.
 - Registration deadlines must be today or later. Web parsing supports timeline cards such as `SEP 23 / REGISTRATION CLOSES`, inferring the year only from an explicit event date on the page. Event start dates alone are not used as web registration deadlines.
@@ -79,3 +85,15 @@ At the start of each scrape, maintenance scans all Calendar pages, shortens exis
 After each Calendar sync, the scraper checks managed Calendar entries for **offline hackathons in Kerala** whose registration deadline is today or within the next three calendar days (using the Calendar's time zone). If one or more qualify, it sends one plain-text email listing only their names, registration deadlines, locations, and links. It sends no email when none qualify. Online events, events outside Kerala, personal entries, and recurring entries are excluded.
 
 Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow. A successful send records the day in the saved discovery state, so further workflow runs that day skip email. If that cache is deleted, the daily send record is lost.
+
+## Reliability
+
+A run ends with a non-zero exit code, after syncing everything it did find, whenever a hackathon could have been missed: a listing page or event page that still fails after retries, a platform that returns nothing, a Calendar entry that could not be saved, or rejected Calendar credentials. On GitHub Actions that marks the run as failed and GitHub emails you; a green run means every source was read in full. The log ends with the list of problems.
+
+- Each listing API is read to the last page it reports. Pages are often shorter than the page size, so a short page is never treated as the end.
+- Requests are retried on timeouts, 429 and 5xx responses. One failing source does not stop the others.
+- Unstop logs how many listings it skipped and why (`not-a-hackathon`, `registration-closed`, ...).
+- The venue a platform states for an in-person event is kept as given. Description text only supplies a venue for an event listed as online, and only when it names a recognisable place.
+- An event listed as online stays online when its text mentions an in-person round without a venue; the Calendar entry carries a note to check the event page.
+- Two listings on the same platform are never merged, even with the same name. Calendar entries are matched by event link first, then by name.
+- The workflow runs daily at 06:00 UTC.

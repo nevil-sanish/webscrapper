@@ -3,8 +3,9 @@ name: Hack Scrapper & Calendar Sync
 on:
   push:
   schedule:
-    # Runs at 06:00 UTC every 2 days
-    - cron: '0 6 */2 * *'
+    # Runs at 06:00 UTC (11:30 IST) every day. Registration windows can be a
+    # week or less, so a skipped day is a large share of the time to react.
+    - cron: '0 6 * * *'
   workflow_dispatch: # Allows manual triggering from GitHub UI
 
 concurrency:
@@ -46,6 +47,7 @@ jobs:
         GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET || secrets.GOOGLE_SEARCH_CLIENT_SECRET }}
         GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
         GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+        GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
         SMTP_HOST: ${{ secrets.SMTP_HOST }}
         SMTP_PORT: ${{ secrets.SMTP_PORT }}
         SMTP_USER: ${{ secrets.SMTP_USER }}

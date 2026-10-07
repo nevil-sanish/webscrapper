@@ -46,7 +46,7 @@ async function discoverViaSearch(options = {}) {
     }
     // Social search snippets can supply event names, but do not become calendar events.
     if (isSocial(url)) return;
-    if (options.platformsCovered && /(^|\.)(unstop\.com|devfolio\.co)$/.test(new URL(url).hostname)) return;
+    if (options.platformsCovered && /(^|\.)(unstop\.com|devfolio\.co|devpost\.com)$/.test(new URL(url).hostname)) return;
     const existing = candidates.get(url);
     if (!existing || entry.score > existing.score) candidates.set(url, entry);
   }
@@ -82,7 +82,15 @@ async function discoverViaSearch(options = {}) {
   const userAgent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36';
   async function rendered(url) {
     browserPromise ||= chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
-    const browser = await browserPromise;
+    let browser;
+    try {
+      browser = await browserPromise;
+    } catch (error) {
+      // Without a browser most event pages cannot be read; say so once, loudly.
+      if (!report.browserError) console.error(`Discovery cannot start a browser: ${error.message.split('\n')[0]}`);
+      report.browserError = error.message.split('\n')[0];
+      throw error;
+    }
     const page = await browser.newPage({ userAgent });
     try {
       await page.route('**/*', route => ['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue());
@@ -164,6 +172,7 @@ async function discoverViaSearch(options = {}) {
     fs.writeFileSync(file, JSON.stringify(report, null, 2));
     console.log(`Discovery inspected ${visited.size} pages; accepted ${events.length}; ${report.deferred} deferred. Report: ${file}`);
   }
+  if (report.browserError) events.stats = { complete: false, note: `no browser (${report.browserError}); run \`npx playwright install chromium\` or set CHROMIUM_PATH` };
   return events;
 }
 module.exports = { discoverViaSearch };

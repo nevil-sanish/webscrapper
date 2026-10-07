@@ -1,5 +1,15 @@
 const stringSimilarity = require('string-similarity');
 const { normalizeName, normalizeDate } = require('./normalize');
+const { localDay } = require('./calendarPolicy');
+
+// A platform lists each of its events once, under its own URL. Two of its
+// listings are therefore two events however alike they are named: an offline
+// and a "(Virtual)" edition, or three colleges each running a "Hackathon".
+const PLATFORMS = new Set(['unstop', 'devfolio', 'devpost']);
+function separateListings(a, b) {
+  return PLATFORMS.has(a.source) && a.source === b.source &&
+    Boolean(a.sourceUrl) && Boolean(b.sourceUrl) && a.sourceUrl !== b.sourceUrl;
+}
 
 /**
  * Deduplicates an in-memory array of scraped hackathon objects.
@@ -10,8 +20,9 @@ const { normalizeName, normalizeDate } = require('./normalize');
 function deduplicateHackathons(hackathons) {
   const uniqueList = [];
 
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Compared as calendar days in the event timezone, so the machine's own
+  // timezone (UTC on CI) cannot expire a deadline that falls today.
+  const today = localDay(new Date());
 
   for (let h of hackathons) {
     if (!h || !h.name || typeof h.name !== 'string') continue;
@@ -21,7 +32,7 @@ function deduplicateHackathons(hackathons) {
 
     // Skip events that completed in the past
     const latestDate = dateEnd || dateNew;
-    if (latestDate && new Date(latestDate) < today) {
+    if (latestDate && localDay(latestDate) < today) {
       continue;
     }
 
@@ -30,6 +41,7 @@ function deduplicateHackathons(hackathons) {
     let match = null;
 
     for (let ex of uniqueList) {
+      if (separateListings(h, ex)) continue;
       const normNameEx = normalizeName(ex.name);
       const similarity = stringSimilarity.compareTwoStrings(normNameNew, normNameEx);
 

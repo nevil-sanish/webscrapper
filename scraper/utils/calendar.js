@@ -11,9 +11,19 @@ const REFRESH_TOKEN = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
 let calendar = null;
-let cachedCalendarEventsMap = null;
+let cachedCalendarEvents = null;
 
-if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
+// A service account key never expires and needs no consent screen, so it is
+// preferred over the OAuth refresh token when both are set. The calendar must
+// be shared with the service account and named in GOOGLE_CALENDAR_ID: its own
+// "primary" calendar is an empty one nobody looks at.
+if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+    scopes: ['https://www.googleapis.com/auth/calendar.events']
+  });
+  calendar = google.calendar({ version: 'v3', auth });
+} else if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
   const oauth2Client = new google.auth.OAuth2(
     CLIENT_ID,
     CLIENT_SECRET
@@ -34,45 +44,64 @@ function getCalendarClient() {
   return calendar;
 }
 
+const linkOf = description => String(description || '').match(/^Link:[ \t]*(\S+)/m)?.[1] || '';
+
 /**
- * Loads all existing upcoming calendar events into memory for instant duplicate check and date updating
+ * Loads the upcoming scraper-managed calendar entries, indexed by event link
+ * and by name. A failed listing throws: carrying on with an empty index would
+ * add every hackathon a second time.
  */
-async function getExistingCalendarEventsMap() {
-  if (cachedCalendarEventsMap) return cachedCalendarEventsMap;
-  cachedCalendarEventsMap = new Map();
-  
-  if (!calendar) return cachedCalendarEventsMap;
+async function getExistingCalendarEvents() {
+  if (cachedCalendarEvents) return cachedCalendarEvents;
+  const index = { byLink: new Map(), byName: new Map(), claimed: new Set() };
+  if (!calendar) return index;
 
-  try {
-    let pageToken;
-    do {
-      const res = await calendar.events.list({
-        calendarId: CALENDAR_ID,
-        timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-        maxResults: 2500,
-        singleEvents: true,
-        pageToken,
-      });
+  let pageToken;
+  do {
+    const res = await calendar.events.list({
+      calendarId: CALENDAR_ID,
+      timeMin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      maxResults: 2500,
+      singleEvents: true,
+      pageToken,
+    });
 
-      for (let item of res.data.items || []) {
-        if (item.summary && isManaged(item)) {
-          cachedCalendarEventsMap.set(originalName(item.summary).trim().toLowerCase(), {
-            id: item.id,
-            summary: item.summary,
-            start: item.start,
-            end: item.end,
-            colorId: item.colorId,
-            description: item.description || ''
-          });
-        }
+    for (let item of res.data.items || []) {
+      if (item.summary && isManaged(item)) {
+        const entry = {
+          id: item.id,
+          summary: item.summary,
+          start: item.start,
+          end: item.end,
+          colorId: item.colorId,
+          description: item.description || ''
+        };
+        index.byName.set(originalName(item.summary).trim().toLowerCase(), entry);
+        if (linkOf(entry.description)) index.byLink.set(linkOf(entry.description), entry);
       }
-      pageToken = res.data.nextPageToken;
-    } while (pageToken);
-  } catch (error) {
-    console.error('Error fetching existing calendar events for deduplication:', error.message);
-  }
+    }
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
 
-  return cachedCalendarEventsMap;
+  cachedCalendarEvents = index;
+  return index;
+}
+
+// The link identifies a listing. The name is the fallback for a hackathon found
+// through a different source than last time, but an entry already matched in
+// this run belongs to another listing that merely shares the name.
+function findExisting(index, hackathon) {
+  const byLink = hackathon.sourceUrl && index.byLink.get(hackathon.sourceUrl);
+  if (byLink) return byLink;
+  const byName = index.byName.get(hackathon.name.trim().toLowerCase());
+  return byName && !index.claimed.has(byName.id) ? byName : null;
+}
+
+function remember(index, hackathon, entry) {
+  for (const [link, known] of index.byLink) if (known === entry) index.byLink.delete(link);
+  if (hackathon.sourceUrl) index.byLink.set(hackathon.sourceUrl, entry);
+  index.byName.set(hackathon.name.trim().toLowerCase(), entry);
+  index.claimed.add(entry.id);
 }
 
 
@@ -210,6 +239,7 @@ function calendarWindow(hackathon, now = new Date()) {
  * Creates or updates a one-day all-day entry on the registration deadline.
  * @param {Object} hackathon - The hackathon object
  * @returns {Promise<boolean>} - True if newly added or updated, false if unchanged or skipped
+ * @throws when Google Calendar rejects the write, so the run can report it
  */
 async function addEventToCalendar(hackathon) {
   if (!calendar) return false;
@@ -231,6 +261,9 @@ async function addEventToCalendar(hackathon) {
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
   desc += `Location: ${hackathon.location || 'Online'}\n`;
   desc += `Link: ${hackathon.sourceUrl}\n`;
+  if (String(hackathon.mode).toLowerCase() === 'online' && hackathon.attendanceEvidence) {
+    desc += 'Note: the listing mentions an in-person round without giving a venue - check the event page.\n';
+  }
   if (hackathon.fee) desc += `Registration Fee: ${hackathon.fee}\n`;
   if (hackathon.daysLeft) desc += `Days Left: ${hackathon.daysLeft}\n`;
 
@@ -249,11 +282,11 @@ async function addEventToCalendar(hackathon) {
   if (hackathon.description) desc += `\n${hackathon.description}`;
 
   // Check against existing calendar events
-  const existingMap = await getExistingCalendarEventsMap();
-  const normName = hackathon.name.trim().toLowerCase();
-  const existing = existingMap.get(normName);
+  const index = await getExistingCalendarEvents();
+  const existing = findExisting(index, hackathon);
 
   if (existing) {
+    remember(index, hackathon, existing);
     const existingDate = (existing.start?.date || existing.start?.dateTime || '').slice(0, 10);
     const existingEnd = (existing.end?.date || existing.end?.dateTime || '').slice(0, 10);
     const existingDesc = (existing.description || '').trim();
@@ -264,31 +297,26 @@ async function addEventToCalendar(hackathon) {
     }
 
     // Otherwise, patch and update the event to the correct registration date, color, and description
-    try {
-      await calendar.events.patch({
-        calendarId: CALENDAR_ID,
-        eventId: existing.id,
-        resource: {
-          summary,
-          extendedProperties: { private: { managedBy: 'hack-scrapper' } },
-          start: { date: startDateStr },
-          end: { date: nextDayStr },
-          colorId: colorId,
-          description: desc,
-          location: hackathon.location || 'Online'
-        }
-      });
-      console.log(`Updated Google Calendar event "${hackathon.name}" (${startDateStr}, color: ${colorName})`);
-      existing.start = { date: startDateStr };
-      existing.end = { date: nextDayStr };
-      existing.summary = summary;
-      existing.colorId = colorId;
-      existing.description = desc;
-      return true;
-    } catch (err) {
-      console.error(`Error updating calendar event for "${hackathon.name}":`, err.message);
-      return false;
-    }
+    await calendar.events.patch({
+      calendarId: CALENDAR_ID,
+      eventId: existing.id,
+      resource: {
+        summary,
+        extendedProperties: { private: { managedBy: 'hack-scrapper' } },
+        start: { date: startDateStr },
+        end: { date: nextDayStr },
+        colorId: colorId,
+        description: desc,
+        location: hackathon.location || 'Online'
+      }
+    });
+    console.log(`Updated Google Calendar event "${hackathon.name}" (${startDateStr}, color: ${colorName})`);
+    existing.start = { date: startDateStr };
+    existing.end = { date: nextDayStr };
+    existing.summary = summary;
+    existing.colorId = colorId;
+    existing.description = desc;
+    return true;
   }
 
   const event = {
@@ -305,22 +333,17 @@ async function addEventToCalendar(hackathon) {
     },
   };
 
-  try {
-    const res = await calendar.events.insert({
-      calendarId: CALENDAR_ID,
-      resource: event,
-    });
-    console.log(`Event created in Google Calendar for "${hackathon.name}" (${startDateStr}, color: ${colorName}): ${res.data.htmlLink}`);
-    existingMap.set(normName, { id: res.data.id, start: { date: startDateStr }, end: { date: nextDayStr }, colorId, summary, description: desc });
-    return true;
-  } catch (error) {
-    console.error(`Error creating calendar event for "${hackathon.name}":`, error.response?.data?.error?.message || error.message);
-    return false;
-  }
+  const res = await calendar.events.insert({
+    calendarId: CALENDAR_ID,
+    resource: event,
+  });
+  console.log(`Event created in Google Calendar for "${hackathon.name}" (${startDateStr}, color: ${colorName}): ${res.data.htmlLink}`);
+  remember(index, hackathon, { id: res.data.id, start: { date: startDateStr }, end: { date: nextDayStr }, colorId, summary, description: desc });
+  return true;
 }
 
 /**
- * Deletes all hackathon calendar events in the configured calendar
+ * Deletes the scraper-managed hackathon events in the configured calendar
  */
 async function clearAllCalendarEvents() {
   if (!calendar) {
@@ -329,15 +352,21 @@ async function clearAllCalendarEvents() {
   }
 
   try {
-    const res = await calendar.events.list({
-      calendarId: CALENDAR_ID,
-      timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      maxResults: 2500,
-      singleEvents: true,
-    });
-
-    const items = res.data.items || [];
-    console.log(`Found ${items.length} calendar events to remove.`);
+    // Only entries this scraper created: the calendar may be a personal one.
+    const items = [];
+    let pageToken;
+    do {
+      const res = await calendar.events.list({
+        calendarId: CALENDAR_ID,
+        timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        maxResults: 2500,
+        singleEvents: true,
+        pageToken,
+      });
+      items.push(...(res.data.items || []).filter(isManaged));
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
+    console.log(`Found ${items.length} hackathon calendar events to remove.`);
 
     let deletedCount = 0;
     for (const item of items) {
@@ -353,9 +382,7 @@ async function clearAllCalendarEvents() {
       }
     }
 
-    if (cachedCalendarEventsMap) {
-      cachedCalendarEventsMap.clear();
-    }
+    cachedCalendarEvents = null;
 
     console.log(`Successfully removed ${deletedCount} events from Google Calendar.`);
     return deletedCount;
@@ -412,7 +439,7 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
       console.error(`Calendar maintenance failed for ${h.name}: ${error.code || error.name}`);
     }
   }
-  cachedCalendarEventsMap = null;
+  cachedCalendarEvents = null;
   console.log(`Calendar maintenance: ${deleted} removed, ${updated} entries updated.`);
   if (failed) throw new Error(`Calendar maintenance failed for ${failed} event(s)`);
   return { deleted, updated };

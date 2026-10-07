@@ -1,7 +1,8 @@
 const { classifyAttendance, keralaPriority, plainText } = require('../utils/eventPolicy');
-const axios = require('axios');
 const cheerio = require('cheerio');
 const { parseDateToYMD, parseCountdownToDate } = require('../utils/pageParser');
+const { localDay } = require('../utils/calendarPolicy');
+const { getWithRetry, postWithRetry, sleep } = require('../utils/http');
 
 /**
  * Scrapes Devfolio hackathons by discovering open hackathons and visiting
@@ -12,7 +13,7 @@ const { parseDateToYMD, parseCountdownToDate } = require('../utils/pageParser');
  * 4. registration end date (from countdown timer / reg_ends_at)
  */
 function resolveRegistrationDeadline({ timerTimestamp, bodyText, now = new Date(), todayYMD, countdownParser = parseCountdownToDate } = {}) {
-  const today = todayYMD || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const today = todayYMD || localDay(now);
 
   // The rendered countdown is the live source of truth. Devfolio's search
   // index can retain an old reg_ends_at value after organisers extend a
@@ -27,44 +28,52 @@ function resolveRegistrationDeadline({ timerTimestamp, bodyText, now = new Date(
   return indexedDate && indexedDate >= today ? indexedDate : null;
 }
 
-async function scrapeDevfolio() {
+async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
   console.log('Scraping Devfolio (https://devfolio.co/hackathons/open)...');
   const hackathons = [];
+  const stats = { source: 'devfolio', listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, complete: false };
+  hackathons.stats = stats;
+  const retry = { delayMs: retryDelayMs };
 
   try {
-    let from = 0;
     const size = 30;
-    let hasMore = true;
+    let totalPages = null;
     const now = new Date();
-    const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayYMD = localDay(now);
     const openHackathonsList = [];
     const seenSubdomains = new Set();
 
-    // Step 1: Discover list of open hackathons from Devfolio
-    while (hasMore) {
+    // Step 1: Discover list of open hackathons from Devfolio. Every page the
+    // reported total implies is requested; a page that keeps failing is
+    // counted and the remaining pages are still read.
+    for (let from = 0; from < (totalPages || 1) * size; from += size) {
       console.log(`Fetching Devfolio open hackathons list (from ${from})...`);
-      const response = await axios.post('https://api.devfolio.co/api/search/hackathons', {
-        type: 'application_open',
-        from: from,
-        size: size
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        },
-        family: 4,
-        timeout: 10000
-      });
-
-      const hits = response.data?.hits?.hits || [];
-      const total = response.data?.hits?.total?.value || 0;
-
-      if (hits.length === 0) {
-        hasMore = false;
-        break;
+      let response;
+      try {
+        response = await postWithRetry('https://api.devfolio.co/api/search/hackathons', {
+          type: 'application_open',
+          from: from,
+          size: size
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+          },
+          family: 4,
+          timeout: 10000
+        }, retry);
+      } catch (error) {
+        stats.failedPages++;
+        console.error(`Devfolio list page (from ${from}) failed: ${error.response?.status || error.code || error.message}`);
+        continue;
       }
 
-      const previousCount = seenSubdomains.size;
+      const hits = response.data?.hits?.hits || [];
+      const reportedTotal = Number(response.data?.hits?.total?.value);
+      if (Number.isInteger(reportedTotal) && reportedTotal > 0) {
+        totalPages = Math.max(totalPages || 0, Math.ceil(reportedTotal / size));
+      }
+
       for (let item of hits) {
         const hit = item._source;
         if (!hit || !hit.name) continue;
@@ -80,15 +89,10 @@ async function scrapeDevfolio() {
         }
       }
 
-      if (seenSubdomains.size === previousCount) break;
-      from += hits.length;
-      if (hits.length < size || (total > 0 && from >= total)) {
-        hasMore = false;
-      } else {
-        await new Promise(r => setTimeout(r, 200));
-      }
+      await sleep(200);
     }
 
+    stats.listed = openHackathonsList.length;
     console.log(`Discovered ${openHackathonsList.length} open hackathons. Visiting exact pages...`);
 
     openHackathonsList.sort((a, b) => keralaPriority(b.initialHit) - keralaPriority(a.initialHit));
@@ -97,14 +101,14 @@ async function scrapeDevfolio() {
     for (let item of openHackathonsList) {
       const exactUrl = `https://${item.subdomain}.devfolio.co`;
       try {
-        const pageRes = await axios.get(exactUrl, {
+        const pageRes = await getWithRetry(exactUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
           },
           family: 4,
           timeout: 10000
-        });
+        }, { ...retry, attempts: 2 });
 
         const html = pageRes.data;
         const $ = cheerio.load(html);
@@ -182,6 +186,7 @@ async function scrapeDevfolio() {
 
         // Filter: Must have a valid registration closing date that is today or in the future
         if (!regEndDate || regEndDate < todayYMD) {
+          stats.skipped['no-open-registration-deadline'] = (stats.skipped['no-open-registration-deadline'] || 0) + 1;
           continue;
         }
 
@@ -226,6 +231,8 @@ async function scrapeDevfolio() {
         hackathons.push(h);
       } catch (err) {
         // Fallback to initialHit if exact page fetch failed
+        stats.failedDetails++;
+        console.error(`Devfolio page ${exactUrl} failed (${err.response?.status || err.code || err.message}); using its listing data.`);
         const hit = item.initialHit;
         const appClosingDate = hit?.hackathon_setting?.reg_ends_at || hit?.reg_ends_at;
         const regEndDate = parseDateToYMD(appClosingDate);
@@ -255,13 +262,16 @@ async function scrapeDevfolio() {
       }
 
       // Respectful delay between page requests
-      await new Promise(r => setTimeout(r, 120));
+      await sleep(120);
     }
+    // A page that fell back to its listing data still produced the event.
+    stats.complete = Boolean(totalPages) && stats.failedPages === 0;
   } catch (error) {
     console.error('Devfolio Scrape Error:', error.message);
   }
 
-  console.log(`Extracted ${hackathons.length} hackathons from Devfolio exact pages.`);
+  console.log(`Extracted ${hackathons.length} hackathons from ${stats.listed} Devfolio listings` +
+    `${stats.complete ? '.' : ` - INCOMPLETE: ${stats.failedPages} listing page(s) failed.`}`);
   return hackathons;
 }
 

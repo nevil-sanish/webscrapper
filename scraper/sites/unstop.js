@@ -1,7 +1,8 @@
 const { isHackathon } = require('../utils/hackathonType');
 const { classifyAttendance, contentText } = require('../utils/eventPolicy');
-const axios = require('axios');
 const { parseDateToYMD } = require('../utils/pageParser');
+const { localDay } = require('../utils/calendarPolicy');
+const { getWithRetry, sleep } = require('../utils/http');
 
 /**
  * Unstop exposes several independent date windows per opportunity, and only
@@ -50,181 +51,189 @@ function resolveUnstopDates(comp) {
   };
 }
 
+// Only what the organiser wrote about each round. The round objects also carry
+// Unstop's own SEO copy and URLs, where "Offline Round" names a round held off
+// the platform rather than one attended in person.
+function roundText(comp) {
+  return roundDetails(comp)
+    .map(d => [d.roundTitle, d.title, d.description, d.display_text].filter(Boolean).join('\n'))
+    .concat((Array.isArray(comp.rounds) ? comp.rounds : [])
+      .flatMap(r => (Array.isArray(r.submission_types) ? r.submission_types : []).map(t => `${t.title || ''}\n${t.remarks || ''}`)))
+    .join('\n');
+}
+
+const sourceLink = (comp, id) => {
+  const path = comp.seo_url || comp.public_url;
+  if (!path) return `https://unstop.com/hackathons/${id}`;
+  return path.startsWith('http') ? path : `https://unstop.com/${path.replace(/^\//, '')}`;
+};
+
+/**
+ * Turns one Unstop competition record into a hackathon, or names the reason
+ * it was left out so a run can report what it skipped instead of hiding it.
+ * @returns {{event: Object}|{skipped: string}}
+ */
+function parseUnstopCompetition(comp, { id = comp?.id, today = localDay(new Date()) } = {}) {
+  if (!comp || !comp.title) return { skipped: 'no-details' };
+
+  // 1. Name
+  const name = comp.title;
+  const content = `${comp.details || ''}\n${roundText(comp)}`;
+  if (!isHackathon({ name }, content)) return { skipped: 'not-a-hackathon' };
+
+  // 2. Days Left & Registration Closing Date
+  const remainDaysText = comp.regnRequirements?.remain_days ||
+    (comp.regnRequirements?.remainingDaysArray ? `${comp.regnRequirements.remainingDaysArray.durations} ${comp.regnRequirements.remainingDaysArray.text}` : null);
+
+  const { registrationDeadline: regClosingDate, eventConductedDate, eventEndDate } = resolveUnstopDates(comp);
+  if (!regClosingDate) return { skipped: 'no-registration-deadline' };
+
+  // Filter: only events whose registration deadline is today or in the future
+  if (regClosingDate < today) return { skipped: 'registration-closed' };
+
+  // 3. Place / Location
+  const address = comp.address_with_country_logo;
+  let location = 'Online';
+  let mode = 'online';
+
+  const regionLower = (comp.region || '').toLowerCase();
+  const locLower = (comp.location || '').toLowerCase();
+  const isOffline = regionLower === 'offline' || locLower.includes('offline') || Boolean(address?.city);
+  const isBoth = (regionLower === 'both' || locLower.includes('both')) || (isOffline && (regionLower.includes('online') || locLower.includes('online')));
+  const venue = [address?.city, address?.state].filter(Boolean).join(', ');
+
+  if (isBoth) {
+    mode = 'both';
+    location = venue || comp.location || 'Hybrid';
+  } else if (isOffline) {
+    mode = 'offline';
+    location = venue || comp.location || 'In-person';
+  }
+
+  // 4. Registration Fee (from top right card)
+  let fee = 'Free';
+  if (Array.isArray(comp.payment_services)) {
+    const paidService = comp.payment_services.find(p => p.amount && p.amount > 0);
+    if (paidService) {
+      fee = `₹${paidService.amount}`;
+    }
+  }
+  if (fee === 'Free' && comp.details) {
+    const feeMatch = comp.details.match(/registration fee[s]?\s*[:\-–]?\s*([₹Rs\.]*\s*[\d,]+)/i);
+    if (feeMatch) {
+      fee = feeMatch[1].trim();
+    }
+  }
+
+  const h = {
+    name: name,
+    startDate: regClosingDate,
+    endDate: eventEndDate || regClosingDate,
+    registrationDeadline: regClosingDate,
+    eventConductedDate,
+    eventEndDate,
+    location: location,
+    mode: mode,
+    fee: fee,
+    daysLeft: remainDaysText,
+    organizer: comp.organization?.name || null,
+    prize: comp.overall_prizes || null,
+    eligibility: null,
+    tags: Array.isArray(comp.filters) ? comp.filters.map(f => f.name).filter(Boolean) : [],
+    description: comp.details ? comp.details.replace(/<[^>]*>/g, ' ').slice(0, 300) : null,
+    sourceUrl: sourceLink(comp, id),
+    source: 'unstop'
+  };
+
+  return { event: classifyAttendance(h, `${content} ${contentText(comp.stages)}`) };
+}
+
+const REQUEST = {
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json'
+  },
+  family: 4,
+  timeout: 10000
+};
+
 /**
  * Scrapes Unstop hackathons across all pagination pages for:
  * https://unstop.com/hackathons?oppstatus=open
- * 
- * For each hackathon, visits its exact page/details to extract:
- * 1. Name (from center part)
- * 2. Mode (from center part: offline, online, both)
- * 3. Place / Location (from center part)
- * 4. Days Left & Registration Deadline (from top right card & live rounds)
- * 5. Registration Fee (from top right card: e.g. ₹ 1,500 or Free)
+ *
+ * Every listing page Unstop reports is visited: pages are routinely shorter
+ * than per_page, so a short page says nothing about being the last one. A
+ * page or competition that still fails after retries is counted and reported
+ * rather than ending the scan or vanishing silently.
+ *
+ * @returns {Promise<Array>} hackathons, with a `stats` property describing the scan
  */
-async function scrapeUnstop() {
+async function scrapeUnstop({ retryDelayMs = 1000 } = {}) {
   console.log('Scraping Unstop (https://unstop.com/hackathons?oppstatus=open)...');
   const hackathons = [];
-  
-  try {
-    let page = 1;
-    let hasMore = true;
-    const opportunityIds = [];
-    const seenIds = new Set();
-    
-    // Step 1: Discover hackathons across search pages 1, 2, 3...
-    while (hasMore) {
-      console.log(`Fetching Unstop search page ${page}...`);
-      const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open`;
-      
-      const res = await axios.get(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        },
-        family: 4,
-        timeout: 10000
-      });
-      
-      const items = res.data?.data?.data || [];
-      if (items.length === 0) {
-        hasMore = false;
-        break;
-      }
-      
-      const previousCount = seenIds.size;
-      for (let item of items) {
-        if (item.id && !seenIds.has(item.id)) {
-          seenIds.add(item.id);
-          opportunityIds.push({
-            id: item.id,
-            seo_url: item.seo_url || item.public_url || ''
-          });
-        }
-      }
-      
-      if (seenIds.size === previousCount) break;
-      const lastPage = res.data?.data?.last_page;
-      if ((lastPage && page >= lastPage) || items.length < 15) {
-        hasMore = false;
-      } else {
-        page++;
-        await new Promise(r => setTimeout(r, 100));
+  const stats = { source: 'unstop', listed: 0, failedPages: 0, failedDetails: 0, skipped: {}, complete: false };
+  hackathons.stats = stats;
+  const retry = { delayMs: retryDelayMs };
+
+  let lastPage = null;
+  const opportunityIds = [];
+  const seenIds = new Set();
+
+  // Step 1: Discover hackathons across search pages 1, 2, 3...
+  for (let page = 1; page <= (lastPage || 1); page++) {
+    console.log(`Fetching Unstop search page ${page}${lastPage ? `/${lastPage}` : ''}...`);
+    const searchUrl = `https://unstop.com/api/public/opportunity/search-result?opportunity=hackathons&page=${page}&per_page=15&oppstatus=open`;
+    let res;
+    try {
+      res = await getWithRetry(searchUrl, REQUEST, retry);
+    } catch (error) {
+      stats.failedPages++;
+      console.error(`Unstop search page ${page} failed: ${error.response?.status || error.code || error.message}`);
+      continue;
+    }
+
+    const reportedLastPage = Number(res.data?.data?.last_page);
+    if (Number.isInteger(reportedLastPage) && reportedLastPage > 0) {
+      lastPage = Math.max(lastPage || 0, reportedLastPage);
+    }
+
+    for (const item of res.data?.data?.data || []) {
+      if (item.id && !seenIds.has(item.id)) {
+        seenIds.add(item.id);
+        opportunityIds.push(item.id);
       }
     }
-    
-    console.log(`Found ${opportunityIds.length} open Unstop hackathons across pages. Visiting each exact page...`);
-    
-    const now = new Date();
-    const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-    // Step 2: Visit each hackathon's exact page & competition details
-    for (let opp of opportunityIds) {
-      try {
-        const detailRes = await axios.get(`https://unstop.com/api/public/competition/${opp.id}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json'
-          },
-          family: 4,
-          timeout: 10000
-        });
-        
-        const comp = detailRes.data?.data?.competition;
-        if (!comp || !comp.title) continue;
-
-        // 1. Name
-        const name = comp.title;
-        if (!isHackathon({ name }, `${comp.details || ''} ${contentText(comp.rounds)}`)) continue;
-
-        // 2. Days Left & Registration Closing Date
-        const remainDaysText = comp.regnRequirements?.remain_days ||
-          (comp.regnRequirements?.remainingDaysArray ? `${comp.regnRequirements.remainingDaysArray.durations} ${comp.regnRequirements.remainingDaysArray.text}` : null);
-
-        const { registrationDeadline: regClosingDate, eventConductedDate, eventEndDate } = resolveUnstopDates(comp);
-
-        if (!regClosingDate) continue;
-
-        // Filter: only events whose registration deadline is today or in the future
-        if (regClosingDate < todayYMD) {
-          continue;
-        }
-
-        // 3. Place / Location
-        const address = comp.address_with_country_logo;
-        let location = 'Online';
-        let mode = 'online';
-
-        const regionLower = (comp.region || '').toLowerCase();
-        const locLower = (comp.location || '').toLowerCase();
-        const isOffline = regionLower === 'offline' || locLower.includes('offline') || Boolean(address?.city);
-        const isBoth = (regionLower === 'both' || locLower.includes('both')) || (isOffline && (regionLower.includes('online') || locLower.includes('online')));
-
-        if (isBoth) {
-          mode = 'both';
-          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : (comp.location || 'Hybrid');
-        } else if (isOffline) {
-          mode = 'offline';
-          location = address?.city ? `${address.city}${address.state ? ', ' + address.state : ''}` : (comp.location || 'In-person');
-        }
-
-        // 4. Registration Fee (from top right card)
-        let fee = 'Free';
-        if (Array.isArray(comp.payment_services)) {
-          const paidService = comp.payment_services.find(p => p.amount && p.amount > 0);
-          if (paidService) {
-            fee = `₹${paidService.amount}`;
-          }
-        }
-        if (fee === 'Free' && comp.details) {
-          const feeMatch = comp.details.match(/registration fee[s]?\s*[:\-–]?\s*([₹Rs\.]*\s*[\d,]+)/i);
-          if (feeMatch) {
-            fee = feeMatch[1].trim();
-          }
-        }
-        
-        let sourceUrl = `https://unstop.com/hackathons/${opp.id}`;
-        if (comp.seo_url) {
-          sourceUrl = comp.seo_url.startsWith('http') ? comp.seo_url : `https://unstop.com/${comp.seo_url.replace(/^\//, '')}`;
-        } else if (comp.public_url) {
-          sourceUrl = comp.public_url.startsWith('http') ? comp.public_url : `https://unstop.com/${comp.public_url.replace(/^\//, '')}`;
-        }
-          
-        let h = {
-          name: name,
-          startDate: regClosingDate,
-          endDate: eventEndDate || regClosingDate,
-          registrationDeadline: regClosingDate,
-          eventConductedDate,
-          eventEndDate,
-          location: location,
-          mode: mode,
-          fee: fee,
-          daysLeft: remainDaysText,
-          organizer: comp.organization?.name || null,
-          prize: comp.overall_prizes || null,
-          eligibility: null,
-          tags: Array.isArray(comp.filters) ? comp.filters.map(f => f.name).filter(Boolean) : [],
-          description: comp.details ? comp.details.replace(/<[^>]*>/g, ' ').slice(0, 300) : null,
-          sourceUrl: sourceUrl,
-          source: 'unstop'
-        };
-        
-        h = classifyAttendance(h, `${comp.details || ''} ${contentText(comp.rounds)} ${contentText(comp.stages)}`);
-        hackathons.push(h);
-      } catch (detailErr) {
-        // Skip individual network failure
-      }
-      
-      // Respectful pause between API calls
-      await new Promise(r => setTimeout(r, 60));
-    }
-    
-  } catch (error) {
-    console.error('Unstop Scrape Error:', error.message);
+    await sleep(100);
   }
-  
-  console.log(`Extracted ${hackathons.length} hackathons from Unstop exact pages.`);
+
+  stats.listed = opportunityIds.length;
+  console.log(`Found ${opportunityIds.length} open Unstop hackathons across ${lastPage || 0} pages. Visiting each exact page...`);
+
+  const today = localDay(new Date());
+
+  // Step 2: Visit each hackathon's exact page & competition details
+  for (const id of opportunityIds) {
+    try {
+      const detailRes = await getWithRetry(`https://unstop.com/api/public/competition/${id}`, REQUEST, retry);
+      const result = parseUnstopCompetition(detailRes.data?.data?.competition, { id, today });
+      if (result.event) hackathons.push(result.event);
+      else stats.skipped[result.skipped] = (stats.skipped[result.skipped] || 0) + 1;
+    } catch (detailErr) {
+      stats.failedDetails++;
+      console.error(`Unstop competition ${id} failed: ${detailErr.response?.status || detailErr.code || detailErr.message}`);
+    }
+
+    // Respectful pause between API calls
+    await sleep(60);
+  }
+
+  // No listing page reporting a page count means the scan saw nothing at all.
+  stats.complete = Boolean(lastPage) && stats.failedPages === 0 && stats.failedDetails === 0;
+  const skipped = Object.entries(stats.skipped).map(([reason, count]) => `${count} ${reason}`).join(', ');
+  console.log(`Extracted ${hackathons.length} hackathons from ${stats.listed} Unstop listings` +
+    `${skipped ? ` (skipped: ${skipped})` : ''}` +
+    `${stats.complete ? '.' : ` - INCOMPLETE: ${stats.failedPages} listing page(s) and ${stats.failedDetails} competition(s) failed.`}`);
   return hackathons;
 }
 
-module.exports = { scrapeUnstop, resolveUnstopDates };
+module.exports = { scrapeUnstop, resolveUnstopDates, parseUnstopCompetition };
