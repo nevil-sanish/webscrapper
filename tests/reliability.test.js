@@ -198,3 +198,24 @@ test('a timestamp without an offset keeps its own day on any machine', () => {
   assert.equal(parseDateToYMD('2026-11-10T18:29:00+00:00'), '2026-11-10');
   assert.equal(parseDateToYMD('2026-11-10T18:31:00Z'), '2026-11-11');
 });
+
+test("Devfolio's full venue address is kept over the shortened Happening card", async () => {
+  const { scrapeDevfolio } = require('../scraper/sites/devfolio');
+  const hackathon = { name: 'haxfinity', slug: 'haxfinity', is_online: false, city: 'Myladi', country: 'India',
+    location: 'Amal College of Advanced Studies, Nilambur, Myladi, Eranhimangad, Kerala, India',
+    settings: { reg_ends_at: '2099-11-10T18:29:00+00:00' } };
+  const originalPost = axios.post;
+  const originalGet = axios.get;
+  axios.post = async () => ({ data: { hits: { total: { value: 1 }, hits: [{ _source: hackathon }] } } });
+  axios.get = async () => ({ data: `<html><body><p>HAPPENING</p><p>Myladi, India</p>
+    <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { hackathon } } })}</script></body></html>` });
+  try {
+    const [event] = await scrapeDevfolio();
+    assert.match(event.location, /Nilambur.*Kerala/);
+    assert.equal(event.registrationDeadline, '2099-11-10');
+    assert.equal(shouldKeepHackathon(event), true);
+  } finally {
+    axios.post = originalPost;
+    axios.get = originalGet;
+  }
+});

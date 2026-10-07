@@ -136,7 +136,9 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
                     item.initialHit?.location;
         const bodyText = plainText($('body').html());
         const happeningMatch = bodyText.match(/HAPPENING\s*\n+([^\n]+)/i);
-        if (happeningMatch && !/online/i.test(happeningMatch[1])) {
+        // The "Happening" card shortens the venue to "Myladi, India", dropping the
+        // state the full address carries. It is only a fallback.
+        if (!place && happeningMatch && !/online/i.test(happeningMatch[1])) {
           place = happeningMatch[1].trim();
         }
         if (!place) {
