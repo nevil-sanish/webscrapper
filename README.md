@@ -1,8 +1,8 @@
 # Hack Scrapper
 
-Discovers hackathons through Devfolio and Unstop, then syncs registration reminders to Google Calendar.
+Discovers hackathons through Devfolio, Unstop, Devpost, and the ChaiCoders tracking sheet, then syncs registration reminders to Google Calendar.
 
-> Devpost and web search discovery are currently switched off in `scraper/run-scraper.js`. The sections describing them below apply only if they are re-enabled.
+> Web search discovery is currently switched off in `scraper/run-scraper.js`. The sections describing them below apply only if they are re-enabled.
 
 ## Quick start
 
@@ -23,6 +23,18 @@ Discovers hackathons through Devfolio and Unstop, then syncs registration remind
 Refresh tokens issued while the OAuth consent screen is in **Testing** expire after seven days. In Google Cloud Console, open *Google Auth Platform → Audience* and choose **Publish app** (status "In production") before running `npm run auth:calendar`, otherwise syncing stops a week later with `invalid_grant`. After re-authorizing, copy the new `GOOGLE_CALENDAR_REFRESH_TOKEN` into the GitHub repository secret as well as `.env`.
 
 The scraper needs all three `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, and `GOOGLE_CALENDAR_REFRESH_TOKEN` values to sync. If Calendar is not configured, scraping still runs but no events are synced. If Google reports `invalid_grant` or says the token expired or was revoked, run `npm run auth:calendar` again and replace the stored refresh token. Google's [OAuth documentation](https://developers.google.com/identity/protocols/oauth2) says refresh tokens for an external consent screen in Testing mode expire after seven days (except for basic identity scopes); this scraper requests Calendar access.
+
+### Tracking sheet
+
+Each run also reads the **Hackathon** and **claude** tabs of the ChaiCoders Google Sheet (`scraper/sites/sheet.js`). A row becomes a calendar reminder on its **Closing Date**, with its name and the first link in **Links**. Rows with no closing date, or a closing date that has passed, are skipped. The location rules match the other sources: an offline venue in Kerala is green, one in Tamil Nadu or Karnataka is red, and anything else offline is left out. An online row needs a prize amount and is blue. Changing a row's closing date moves its reminder on the next run.
+
+The sheet is private. The scraper reads it with the OAuth login (`GOOGLE_CALENDAR_REFRESH_TOKEN`) when one is set, even if Calendar uses a service account, and with the service account otherwise:
+
+1. Enable the [Google Sheets API](https://console.cloud.google.com/apis/library/sheets.googleapis.com) in the OAuth client's Cloud project.
+2. Share the sheet (Viewer is enough) with the Google account that owns the refresh token.
+3. Run `npm run auth:calendar` again so the token includes read-only Sheets access, then update `GOOGLE_CALENDAR_REFRESH_TOKEN` in `.env` and in GitHub.
+
+Until this is done, every run reports `Sheet: scan incomplete` and fails.
 
 ### GitHub Actions
 
@@ -60,7 +72,7 @@ The crawler ranks candidates, follows up to two link levels, checks three pages 
 
 Web discovery avoids revisiting Unstop, Devfolio, and Devpost pages during a complete scrape, since their dedicated scrapers already traverse open listings. Unstop results are additionally checked for hackathon content to exclude quizzes, hiring tests, CTFs, and unrelated coding challenges.
 
-**Devpost is currently switched off in `scraper/run-scraper.js`.** When enabled, Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. A Devpost event needs a displayed positive cash prize. Online events are kept; in-person events need a location in Kerala, Tamil Nadu, or Karnataka. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped.
+Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. An online Devpost event needs a displayed positive cash prize. An in-person event needs a location in Kerala, Tamil Nadu, or Karnataka and is kept whatever its prize, even none. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped. Of the eligible entries, only the 20 largest prize pools (ranked in rough USD) are kept, plus every in-person event in Kerala, Tamil Nadu, or Karnataka, plus any hackathon whose organizer is on the top-company list in `scraper/sites/devpost.js`, whatever its prize. The calendar date is the submission deadline, which is also when Devpost registration closes.
 
 Tavily uses basic search with automatic parameter selection disabled. SerpApi is used only when Tavily is unavailable or fails; empty successful results do not consume backup requests. Successful queries are cached for three days. Persistent monthly attempt budgets default to 900 Tavily and 80 SerpApi requests; failures are conservatively counted. These are local counters, not provider account usage measurements. Separate local/CI machines or lost caches cannot enforce an account-wide limit; provider billing limits still apply.
 
@@ -69,7 +81,7 @@ GitHub Actions restores/saves discovery state, serializes scraper runs, and uplo
 ## Event eligibility
 
 - Online hackathons with a registration fee are left out; offline ones may charge.
-- Keep online hackathons without requiring prizes from other sources; Devpost entries require a displayed positive cash prize.
+- Keep online hackathons without requiring prizes from other sources; online Devpost entries require a displayed positive cash prize.
 - Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline.
 - Inspect full event descriptions and round content before truncating summaries.
 - Registration deadlines must be today or later. Web parsing supports timeline cards such as `SEP 23 / REGISTRATION CLOSES`, inferring the year only from an explicit event date on the page. Event start dates alone are not used as web registration deadlines.

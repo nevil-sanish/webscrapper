@@ -27,7 +27,9 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 const scopes = [
-  'https://www.googleapis.com/auth/calendar.events'
+  'https://www.googleapis.com/auth/calendar.events',
+  // Read-only access to the hackathon tracking sheet (scraper/sites/sheet.js)
+  'https://www.googleapis.com/auth/spreadsheets.readonly'
 ];
 
 async function authenticate() {

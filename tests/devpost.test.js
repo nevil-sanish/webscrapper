@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { scrapeDevpost, parseDevpostListing } = require('../scraper/sites/devpost');
+const { scrapeDevpost, parseDevpostListing, isTopCompany } = require('../scraper/sites/devpost');
 const { getEventColorId } = require('../scraper/utils/calendar');
 
 const now = new Date('2026-09-28T10:00:00+05:30');
@@ -28,13 +28,20 @@ test('Devpost cards become deadline reminders with the existing location colors'
     assert.equal(result.registrationDeadline, deadline);
     assert.equal(result.location, listing.displayed_location.location);
     assert.equal(result.prize, '$1,250');
+    assert.equal(result.prizeUsd, 1250);
     assert.equal(getEventColorId(result), color);
   }
 });
 
-test('Devpost excludes no cash, outside venues, and listings with no usable deadline', () => {
+test('Devpost excludes online with no cash, outside venues, and listings with no usable deadline', () => {
   assert.equal(parseDevpostListing(card('No Prize', 'Online', '$<span data-currency-value>0</span>'), now), null);
   assert.equal(parseDevpostListing(card('Other Prize', 'Online', '$1,250', { prizes_counts: { cash: 0, other: 3 } }), now), null);
+  // Offline in the south is kept with no prize at all.
+  for (const place of ['Kochi, Kerala', 'Chennai, Tamil Nadu', 'Bengaluru, Karnataka']) {
+    const free = parseDevpostListing(card(`Free ${place}`, place, '$<span data-currency-value>0</span>', { prizes_counts: { cash: 0, other: 0 } }), now);
+    assert.equal(free.mode, 'offline');
+    assert.equal(free.prize, null);
+  }
   assert.equal(parseDevpostListing(card('Delhi Hack', 'Delhi, India'), now), null);
   assert.equal(parseDevpostListing(card('Unknown Venue', 'Amy Gutman Hall'), now), null);
   assert.equal(parseDevpostListing(card('No Date', 'Online', '$1,250', {
@@ -63,4 +70,26 @@ test('Devpost requests every page reported by total count, including after a sho
   const results = await scrapeDevpost({ client, now });
   assert.deepEqual(requestedPages, [1, 2, 3]);
   assert.deepEqual(results.map(h => h.name), ['First Hack', 'Last Hack']);
+});
+
+test('Devpost keeps the top 20 prize pools plus top companies further down', async () => {
+  const listings = Array.from({ length: 25 }, (_, i) => card(`Hack ${i}`, 'Online', `$${(i + 1) * 1000}`));
+  listings.push(card('Small Google Hack', 'Online', '$100', { organization_name: 'Google' }));
+  listings.push(card('Rupee Hack', 'Online', '₹30,000'));
+  listings.push(card('Tiny Kochi Hack', 'Kochi, Kerala', '$0', { prizes_counts: { cash: 0, other: 0 } }));
+  const client = { async get() { return { data: { meta: { total_count: listings.length, per_page: 50 }, hackathons: listings } }; } };
+  const results = await scrapeDevpost({ client, now });
+  assert.equal(results.length, 22);
+  assert.ok(results.some(h => h.name === 'Tiny Kochi Hack'));
+  assert.equal(results[0].name, 'Hack 24');
+  assert.equal(results[19].name, 'Hack 5');
+  assert.ok(results.slice(20).some(h => h.name === 'Small Google Hack'));
+  assert.ok(results.stats.skippedItems.some(s => s.name === 'Rupee Hack'));
+});
+
+test('Top company match is on whole words', () => {
+  assert.ok(isTopCompany('Amazon Web Services'));
+  assert.ok(isTopCompany('AWS'));
+  assert.ok(!isTopCompany('Metamorph Labs'));
+  assert.ok(!isTopCompany(null));
 });

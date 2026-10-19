@@ -11,6 +11,7 @@ const REFRESH_TOKEN = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN;
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
 let calendar = null;
+let sheetsAuth = null;
 let cachedCalendarEvents = null;
 
 // A service account key never expires and needs no consent screen, so it is
@@ -18,12 +19,16 @@ let cachedCalendarEvents = null;
 // be shared with the service account and named in GOOGLE_CALENDAR_ID: its own
 // "primary" calendar is an empty one nobody looks at.
 if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
-  const auth = new google.auth.GoogleAuth({
+  sheetsAuth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
-    scopes: ['https://www.googleapis.com/auth/calendar.events']
+    // Sheets access reads the hackathon tracking sheet (sites/sheet.js).
+    scopes: ['https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/spreadsheets.readonly']
   });
-  calendar = google.calendar({ version: 'v3', auth });
-} else if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
+  calendar = google.calendar({ version: 'v3', auth: sheetsAuth });
+}
+// The tracking sheet belongs to someone else and is shared with the OAuth
+// account, not the service account, so the OAuth login reads it when present.
+if (CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && REFRESH_TOKEN.trim() !== '') {
   const oauth2Client = new google.auth.OAuth2(
     CLIENT_ID,
     CLIENT_SECRET
@@ -33,7 +38,8 @@ if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
     refresh_token: REFRESH_TOKEN
   });
 
-  calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  sheetsAuth = oauth2Client;
+  if (!calendar) calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 }
 
 function isCalendarConfigured() {
@@ -42,6 +48,10 @@ function isCalendarConfigured() {
 
 function getCalendarClient() {
   return calendar;
+}
+
+function getGoogleAuth() {
+  return sheetsAuth;
 }
 
 const linkOf = description => String(description || '').match(/^Link:[ \t]*(\S+)/m)?.[1] || '';
@@ -453,6 +463,7 @@ module.exports = {
   clearAllCalendarEvents,
   isCalendarConfigured,
   getCalendarClient,
+  getGoogleAuth,
   isSouthIndia,
   getEventColorId,
   getColorName

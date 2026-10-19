@@ -6,6 +6,8 @@ const path = require('path');
 // Scrapers
 const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
+const { scrapeDevpost } = require('./sites/devpost');
+const { scrapeSheet } = require('./sites/sheet');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
@@ -87,8 +89,12 @@ async function run() {
     ...await collect('Devfolio', scrapeDevfolio),
     // 2. Scrape Unstop (https://unstop.com/hackathons?oppstatus=open)
     ...await collect('Unstop', scrapeUnstop),
-    // Devpost (sites/devpost.js) and web search discovery (search/discovery.js)
-    // are switched off at the owner's request: only Devfolio and Unstop run.
+    // 3. Devpost (https://devpost.com/hackathons): top prize pools and top companies only
+    ...await collect('Devpost', scrapeDevpost),
+    // 4. The ChaiCoders tracking sheet, "Hackathon" and "claude" tabs. It can
+    //    legitimately have nothing still open, so an empty result is not a failure.
+    ...await collect('Sheet', scrapeSheet, { expectResults: false }),
+    // Web search discovery (search/discovery.js) is switched off at the owner's request.
   ];
 
   console.log(`\nTotal scraped/extracted: ${allNewHackathons.length}`);
