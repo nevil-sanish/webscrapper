@@ -52,7 +52,7 @@ To run this in your own GitHub repository, add the following under **Settings �
 | `SMTP_USER`, `SMTP_PASS` | SMTP login; the user is also the sender address |
 | `REPORT_EMAIL` | Address that receives deadline email |
 
-Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled for 06:00 UTC on odd-numbered days of the month. It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
+Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled daily at 06:00 UTC (11:30 IST). It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
 
 ### Commands and output
 
