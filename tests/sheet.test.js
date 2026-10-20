@@ -64,7 +64,7 @@ test('each sheet link is read from its own page, with the same filters and color
   const byName = Object.fromEntries(results.map(h => [h.name, h]));
 
   // Names, dates, venues and prizes come from the pages, not the sheet.
-  assert.deepEqual(Object.keys(byName).sort(), ['Campus Hack', 'DevHack 2026', 'Devin Hacks Kochi', 'PayPal AI Hackathon', 'haxfinity']);
+  assert.deepEqual(Object.keys(byName).sort(), ['Campus Hack', 'DevHack 2026', 'Devin Hacks Kochi', 'No Prize Online Hackathon', 'PayPal AI Hackathon', 'haxfinity']);
   assert.equal(byName['DevHack 2026'].registrationDeadline, '2026-10-22');
   assert.equal(byName['DevHack 2026'].prize, '₹1,00,000');
   assert.equal(byName['haxfinity'].registrationDeadline, '2026-11-10');
@@ -76,10 +76,11 @@ test('each sheet link is read from its own page, with the same filters and color
   assert.equal(getEventColorId(byName['DevHack 2026']), '11');
   assert.equal(getEventColorId(byName['Campus Hack']), '11');
   assert.equal(getEventColorId(byName['PayPal AI Hackathon']), '9');
+  // Online without prize money is kept, in purple.
+  assert.equal(getEventColorId(byName['No Prize Online Hackathon']), '3');
 
   const reasons = Object.fromEntries(results.stats.skippedItems.map(s => [s.name.replace(/ \[.*/, ''), s.reason]));
   assert.match(reasons.CASCADE, /not in Kerala\/Tamil Nadu\/Karnataka/);
-  assert.match(reasons['No Prize'], /online without prize money/);
   assert.match(reasons.HFT, /registration closed/);
   assert.match(reasons.SAP, /403/);
   assert.equal(results.stats.complete, true);

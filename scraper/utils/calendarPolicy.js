@@ -3,8 +3,8 @@ const { parseDateToYMD } = require('./pageParser');
 // Event colours are private to the calendar's owner: people the calendar is
 // shared with see one colour for everything. The dot in the title shows the
 // same green / red / blue to every viewer.
-const DOTS = { 10: '🟢', 11: '🔴', 9: '🔵' };
-function originalName(name = '') { return name.replace(/^[12] · (?:[🟢🔴🔵] )?(?:Kerala · )?/u, ''); }
+const DOTS = { 10: '🟢', 11: '🔴', 9: '🔵', 3: '🟣' };
+function originalName(name = '') { return name.replace(/^[12] · (?:[🟢🔴🔵🟣] )?(?:Kerala · )?/u, ''); }
 function calendarSummary(event, colorId) {
   const dot = DOTS[colorId] ? `${DOTS[colorId]} ` : '';
   return `${keralaPriority(event) ? `1 · ${dot}Kerala · ` : `2 · ${dot}`}${originalName(event.name)}`;

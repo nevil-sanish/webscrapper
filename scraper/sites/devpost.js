@@ -51,9 +51,6 @@ function parseDevpostListing(listing, now = new Date()) {
 
   const shownLocation = String(listing.displayed_location?.location || '').trim();
   const online = listing.displayed_location?.icon === 'globe' || /^online$/i.test(shownLocation);
-  // Only online hackathons need a cash prize. An offline one in Kerala, Tamil
-  // Nadu or Karnataka is kept whatever it offers.
-  if (online && !prize) return null;
   const event = {
     name: listing.title.trim(),
     source: 'devpost',

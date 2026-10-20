@@ -2,7 +2,7 @@ const { originalName, calendarSummary, isManaged, registrationDeadlineDay, isReg
 const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
 const { isSameHackathon } = require('./normalize');
-const { keralaPriority } = require('./eventPolicy');
+const { keralaPriority, hasPrizeMoney, isPaid } = require('./eventPolicy');
 const { google } = require('googleapis');
 require('dotenv').config();
 
@@ -130,7 +130,7 @@ const SOUTH_INDIA_TERMS = [
   'kollam', 'quilon', 'kottayam', 'palakkad', 'palghat', 'kannur', 'cannanore', 'malappuram', 'alappuzha', 'alleppey',
   'kasaragod', 'wayanad', 'idukki', 'pathanamthitta', 'karunagappally', 'kothamangalam', 'nilambur', 'nalanchira', 'thodiyoor',
   // Tamil Nadu cities & places
-  'chennai', 'madras', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
+  'chennai', 'madras', 'vandalur', 'tambaram', 'guindy', 'chengalpattu', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
   'erode', 'vellore', 'thanjavur', 'dindigul', 'tiruppur', 'tirupur', 'kanchipuram', 'kancheepuram', 'karur', 'nagercoil',
   'hosur', 'theni', 'sivakasi', 'virudhunagar', 'kattankulathur', 'cuddalore', 'kumbakonam', 'pollachi',
   // Karnataka cities & places
@@ -199,13 +199,13 @@ function getEventColorId(hackathon) {
   const isExplicitOnline = mode === 'online' || mode === 'virtual';
   const hasNoPhysicalLoc = !loc || loc === 'online' || loc === 'virtual' || loc === 'remote';
 
-  // Pure online event
-  if (isExplicitOnline && hasNoPhysicalLoc) {
-    return '9'; // Blueberry (Blue)
-  }
+  // Pure online event: Blueberry (blue) when free to enter with prize money,
+  // Grape (purple) when it has no prize money or charges a registration fee.
+  const online = h => (hasPrizeMoney(h.prize) && !isPaid(h.fee) ? '9' : '3');
+  if (isExplicitOnline && hasNoPhysicalLoc) return online(hackathon);
 
   if (hasNoPhysicalLoc && !mode.includes('offline') && !mode.includes('in-person') && !mode.includes('both') && !mode.includes('hybrid')) {
-    return '9'; // Blueberry (Blue)
+    return online(hackathon);
   }
 
   // Offline or hybrid/both event
@@ -217,6 +217,7 @@ function getColorName(colorId) {
     case '10': return 'Green';
     case '9': return 'Blue';
     case '11': return 'Red';
+    case '3': return 'Purple';
     default: return colorId;
   }
 }
@@ -426,7 +427,7 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
   let failed = 0;
   // Of two copies of one hackathon, the one linking to Unstop, Devfolio or
   // Devpost is kept: it is the copy the next scrape will keep up to date.
-  const platformFirst = item => (/^Link:\s*https?:\/\/(?:[\w-]+\.)?(?:unstop\.com|devfolio\.co|devpost\.com)\b/m.test(item.description || '') ? 0 : 1);
+  const platformFirst = item => (/^Link:\s*https?:\/\/(?:[\w-]+\.)?(?:unstop\.com|devfolio\.co|devpost\.com|hackindia\.org)\b/m.test(item.description || '') ? 0 : 1);
   const kept = [];
   for (const item of [...items].sort((a, b) => platformFirst(a) - platformFirst(b))) {
     if (!isManaged(item) || item.recurrence || item.recurringEventId) continue;

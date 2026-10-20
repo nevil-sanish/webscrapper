@@ -1,6 +1,6 @@
 # Hack Scrapper
 
-Discovers hackathons through Devfolio, Unstop, Devpost, and the ChaiCoders tracking sheet, then syncs registration reminders to Google Calendar.
+Discovers hackathons through Devfolio, Unstop, Devpost, HackIndia, and the ChaiCoders tracking sheet, then syncs registration reminders to Google Calendar.
 
 > Web search discovery is currently switched off in `scraper/run-scraper.js`. The sections describing them below apply only if they are re-enabled.
 
@@ -23,6 +23,10 @@ Discovers hackathons through Devfolio, Unstop, Devpost, and the ChaiCoders track
 Refresh tokens issued while the OAuth consent screen is in **Testing** expire after seven days. In Google Cloud Console, open *Google Auth Platform → Audience* and choose **Publish app** (status "In production") before running `npm run auth:calendar`, otherwise syncing stops a week later with `invalid_grant`. After re-authorizing, copy the new `GOOGLE_CALENDAR_REFRESH_TOKEN` into the GitHub repository secret as well as `.env`.
 
 The scraper needs all three `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, and `GOOGLE_CALENDAR_REFRESH_TOKEN` values to sync. If Calendar is not configured, scraping still runs but no events are synced. If Google reports `invalid_grant` or says the token expired or was revoked, run `npm run auth:calendar` again and replace the stored refresh token. Google's [OAuth documentation](https://developers.google.com/identity/protocols/oauth2) says refresh tokens for an external consent screen in Testing mode expire after seven days (except for basic identity scopes); this scraper requests Calendar access.
+
+### HackIndia
+
+Each run reads https://hackindia.org/hackathons and opens every hackathon listed above the **Past Hackathons** heading; past ones are not visited (`scraper/sites/hackindia.js`). Each event page carries its record in the page data: registration end date, online or venue, prize pool and registration fee. Events that are closed, cancelled or not hackathons are skipped. The same rules, colours and duplicate check as the other sources then apply. A listing page with no upcoming links at all is reported as an incomplete scan, since that most likely means the site changed. HackIndia links in the tracking sheet are read the same way.
 
 ### Tracking sheet
 
@@ -72,7 +76,7 @@ The crawler ranks candidates, follows up to two link levels, checks three pages 
 
 Web discovery avoids revisiting Unstop, Devfolio, and Devpost pages during a complete scrape, since their dedicated scrapers already traverse open listings. Unstop results are additionally checked for hackathon content to exclude quizzes, hiring tests, CTFs, and unrelated coding challenges.
 
-Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. An online Devpost event needs a displayed positive cash prize. An in-person event needs a location in Kerala, Tamil Nadu, or Karnataka and is kept whatever its prize, even none. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped. Of the eligible entries, only the 20 largest prize pools (ranked in rough USD) are kept, plus every in-person event in Kerala, Tamil Nadu, or Karnataka, plus any hackathon whose organizer is on the top-company list in `scraper/sites/devpost.js`, whatever its prize. The calendar date is the submission deadline, which is also when Devpost registration closes.
+Devpost discovery reads every page of its public open/upcoming listing API, using the reported result count and page size. It uses listing cards only, without visiting individual hackathon pages. An in-person event needs a location in Kerala, Tamil Nadu, or Karnataka and is kept whatever its prize, even none. An exact “days left” label sets the reminder date from the scan day; approximate labels use the listing's displayed submission end date. Entries with no usable deadline are skipped. Of the eligible entries, only the 20 largest prize pools (ranked in rough USD) are kept, plus every in-person event in Kerala, Tamil Nadu, or Karnataka, plus any hackathon whose organizer is on the top-company list in `scraper/sites/devpost.js`, whatever its prize. The calendar date is the submission deadline, which is also when Devpost registration closes.
 
 Tavily uses basic search with automatic parameter selection disabled. SerpApi is used only when Tavily is unavailable or fails; empty successful results do not consume backup requests. Successful queries are cached for three days. Persistent monthly attempt budgets default to 900 Tavily and 80 SerpApi requests; failures are conservatively counted. These are local counters, not provider account usage measurements. Separate local/CI machines or lost caches cannot enforce an account-wide limit; provider billing limits still apply.
 
@@ -80,8 +84,8 @@ GitHub Actions restores/saves discovery state, serializes scraper runs, and uplo
 
 ## Event eligibility
 
-- Online hackathons with a registration fee are left out; offline ones may charge.
-- Online hackathons are kept only when they offer prize money (for example `$2,000`, `₹1,00,000`, `INR 20,000`, `75k`), from every source. Unstop's prize is the sum of each prize's cash; Devfolio's is read from its prize names and descriptions.
+- **Every online hackathon is kept**, from every source, whatever its prize or fee. It is **blue** when it is free to enter and offers prize money (for example `$2,000`, `₹1,00,000`, `INR 20,000`, `75k`), and **purple** when it has no prize money or charges a registration fee. Unstop's prize is the sum of each prize's cash; Devfolio's is read from its prize names and descriptions.
+- **Offline hackathons are kept or left out by place alone**, whatever their prize or fee: a venue in Kerala, Tamil Nadu or Karnataka.
 - Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline. A page with no labelled venue takes it from a short line naming a place, such as `CUSAT, Kochi, Kerala`.
 - Inspect full event descriptions and round content before truncating summaries.
 - Registration deadlines must be today or later. Web parsing supports timeline cards such as `SEP 23 / REGISTRATION CLOSES`, inferring the year only from an explicit event date on the page. Event start dates alone are not used as web registration deadlines.
@@ -91,7 +95,7 @@ Discovery remains dependent on search indexing, accessible event content, and ru
 
 ## Calendar
 
-Each managed Calendar event is an all-day entry on the last day to submit the registration form, with a one-day duration. The hackathon's event dates remain in its description when available. Kerala events are green (`10`); other online events are blue (`9`), and other allowed offline events are red (`11`). Google shows an event's own colour only to the calendar's owner; people the calendar is shared with see every event in the one colour they picked for the calendar. So titles also carry the colour as a dot that every viewer sees: `1 · 🟢 Kerala · Name`, `2 · 🔴 Name` (Tamil Nadu or Karnataka), `2 · 🔵 Name` (online). The leading `1`/`2` puts Kerala first in title-sorted views.
+Each managed Calendar event is an all-day entry on the last day to submit the registration form, with a one-day duration. The hackathon's event dates remain in its description when available. Kerala events are green (`10`), offline events in Tamil Nadu or Karnataka red (`11`), online events that are free with prize money blue (`9`), and other online events purple (`3`). Google shows an event's own colour only to the calendar's owner; people the calendar is shared with see every event in the one colour they picked for the calendar. So titles also carry the colour as a dot that every viewer sees: `1 · 🟢 Kerala · Name`, `2 · 🔴 Name` (Tamil Nadu or Karnataka), `2 · 🔵 Name` (online, free, prize money), `2 · 🟣 Name` (online, no prize money or paid entry). The leading `1`/`2` puts Kerala first in title-sorted views.
 
 Two entries closing on the same day with the same link or the same name are one hackathon. Names are compared ignoring case, punctuation, a bracketed note and filler words such as "Hackathon" or the year, and one may contain the other (`BUiLDX` / `BUiLDX Hackathon`). Two different listings on one platform stay separate. Scraped results are merged this way, an existing entry is updated instead of a new one added, and maintenance (before and after each sync) deletes extra copies, keeping the one that links to Unstop, Devfolio or Devpost. It also deletes entries the old sheet reader built from the sheet's own text. Google Calendar does not expose a per-event display-order field, so ordering cannot be guaranteed in every Calendar view.
 

@@ -5,7 +5,7 @@ const { localDay } = require('./calendarPolicy');
 // A platform lists each of its events once, under its own URL. Two of its
 // listings are therefore two events however alike they are named: an offline
 // and a "(Virtual)" edition, or three colleges each running a "Hackathon".
-const PLATFORMS = new Set(['unstop', 'devfolio', 'devpost']);
+const PLATFORMS = new Set(['unstop', 'devfolio', 'devpost', 'hackindia']);
 function separateListings(a, b) {
   return PLATFORMS.has(a.source) && a.source === b.source &&
     Boolean(a.sourceUrl) && Boolean(b.sourceUrl) && a.sourceUrl !== b.sourceUrl;
@@ -42,12 +42,12 @@ function deduplicateHackathons(hackathons) {
 
     const day = dateNew && localDay(dateNew);
     for (let ex of uniqueList) {
-      if (separateListings(h, ex)) continue;
       if (day && isSameHackathon({ name: h.name, day, link: h.sourceUrl },
         { name: ex.name, day: ex.startDate && localDay(ex.startDate), link: ex.sourceUrl })) {
         match = ex;
         break;
       }
+      if (separateListings(h, ex)) continue;
       const normNameEx = normalizeName(ex.name);
       const similarity = stringSimilarity.compareTwoStrings(normNameNew, normNameEx);
 

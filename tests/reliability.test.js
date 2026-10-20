@@ -64,7 +64,6 @@ test("Unstop's own round metadata is not read as in-person attendance", () => {
   // "Prizes worth" on Unstop is the sum of each prize's cash.
   assert.equal(event.prize, '₹50,000');
   assert.equal(shouldKeepHackathon(event), true);
-  assert.equal(shouldKeepHackathon({ ...event, prize: null }), false);
 });
 
 test('an online listing stays online when in-person wording names no venue', () => {
@@ -170,24 +169,28 @@ test('a venue too small to recognise is resolved from the description', () => {
   assert.equal(shouldKeepHackathon(event), true);
 });
 
-test('online hackathons that charge a registration fee are left out', () => {
+test('online hackathons that charge a registration fee are kept and coloured purple', () => {
   const { fromCalendar } = require('../scraper/utils/calendarPolicy');
+  const { getEventColorId } = require('../scraper/utils/calendar');
   for (const fee of ['₹500', 'Rs. 1,500', 'Paid', '200']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), false, fee);
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), true, fee);
+    assert.equal(getEventColorId({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), '3', fee);
   }
   for (const fee of ['Free', '₹0', '', null, undefined]) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), true, String(fee));
+    assert.equal(getEventColorId({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), '9', String(fee));
   }
   // An offline event in an allowed state may charge.
   assert.equal(shouldKeepHackathon({ mode: 'offline', location: 'Kochi, Kerala', fee: '₹500' }), true);
-  // Maintenance sees the fee of an entry already in the calendar.
-  const stored = fromCalendar({ summary: '2 · Paid Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nRegistration Fee: ₹299\n' });
-  assert.equal(shouldKeepHackathon(stored), false);
-  // ...and its prize, so an online reminder with prize money is not removed.
+  // Maintenance reads the fee and prize of an entry already in the calendar,
+  // keeps every online one, and recolours it.
+  const stored = fromCalendar({ summary: '2 · Paid Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nRegistration Fee: ₹299\nPrize: $10,000\n' });
+  assert.equal(shouldKeepHackathon(stored), true);
+  assert.equal(getEventColorId(stored), '3');
   const withPrize = fromCalendar({ summary: '2 · Rich Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nPrize: $10,000\n' });
-  assert.equal(shouldKeepHackathon(withPrize), true);
+  assert.equal(getEventColorId(withPrize), '9');
   const noPrize = fromCalendar({ summary: '2 · Poor Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\n' });
-  assert.equal(shouldKeepHackathon(noPrize), false);
+  assert.equal(shouldKeepHackathon(noPrize), true);
+  assert.equal(getEventColorId(noPrize), '3');
 });
 
 test('numeric dates are read the Indian way, day first', () => {

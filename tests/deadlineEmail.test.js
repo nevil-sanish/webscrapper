@@ -36,9 +36,9 @@ test('the daily digest lists every calendar hackathon closing today through day 
     event('Today Kochi', '27 Sep 2026')
   ];
   const events = upcomingDeadlines(items, now);
-  assert.deepEqual(events.map(x => `${x.dot} ${x.name}`), ['🟢 Today Kochi', '🔴 Chennai', '🔵 Day three online']);
+  assert.deepEqual(events.map(x => `${x.dot} ${x.name}`), ['🟢 Today Kochi', '🔴 Chennai', '🟣 Online no prize', '🔵 Day three online']);
   // Late on the 27th in India is already the 28th.
-  assert.deepEqual(upcomingDeadlines(items, new Date('2026-09-27T20:00:00Z')).map(x => x.name), ['Chennai', 'Day three online', 'Too late']);
+  assert.deepEqual(upcomingDeadlines(items, new Date('2026-09-27T20:00:00Z')).map(x => x.name), ['Chennai', 'Online no prize', 'Day three online', 'Too late']);
 });
 
 test('the last-day alert is only offline Kerala hackathons closing tomorrow', () => {

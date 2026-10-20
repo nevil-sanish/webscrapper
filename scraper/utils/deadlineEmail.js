@@ -88,7 +88,7 @@ function digestText(events, today) {
     lines.push(`${dayLabel(day, today)}`, '');
     for (const event of events.filter(e => e.deadline === day)) lines.push(...eventLines(event), '');
   }
-  lines.push('🟢 Kerala offline · 🔴 Tamil Nadu / Karnataka offline · 🔵 online');
+  lines.push('🟢 Kerala offline · 🔴 Tamil Nadu / Karnataka offline · 🔵 online, free, prize money · 🟣 online, no prize money or paid entry');
   return lines.join('\n').trim();
 }
 

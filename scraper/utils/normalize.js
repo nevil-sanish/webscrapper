@@ -18,8 +18,9 @@ function normalizeName(name) {
 // 9.0 (Odoo × CUSAT)" and "Odoo × Make-A-Ton 9.0". Case, punctuation, a
 // bracketed note and filler words are ignored, and one name may contain the other.
 const FILLER = /\b(?:the|a|an|of|hackathons?|hacks?|national|level|edition|20\d\d)\b/g;
-function nameKey(name) {
-  return String(name || '').toLowerCase().replace(/×/g, 'x').replace(/\([^)]*\)/g, ' ')
+function nameKey(name, { keepBrackets = false } = {}) {
+  const text = String(name || '').toLowerCase().replace(/×/g, 'x');
+  return (keepBrackets ? text : text.replace(/\([^)]*\)/g, ' '))
     .replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(FILLER, ' ').replace(/\s+/g, '');
 }
 function sameName(a, b) {
@@ -36,20 +37,25 @@ function platformOf(url) {
   if (host === 'unstop.com') return 'unstop';
   if (host.endsWith('.devfolio.co')) return 'devfolio';
   if (host.endsWith('.devpost.com')) return 'devpost';
+  if (host === 'hackindia.org') return 'hackindia';
   return null;
 }
 
 /**
  * Two entries are one hackathon when they close on the same day and share a
- * link or a name. Two different listings on one platform stay apart: an
- * offline and a "(Virtual)" edition of the same event are both real.
+ * link or a name. Two listings on one platform need the same name outright,
+ * bracketed note included: Unstop's "BUiLDX" and "BUiLDX Hackathon" are one
+ * event posted twice, but an offline and a "(Virtual)" edition are both real.
  * @param {{name: string, day: string, link?: string}} a
  */
 function isSameHackathon(a, b) {
   if (!a.day || a.day !== b.day) return false;
   const [la, lb] = [linkKey(a.link), linkKey(b.link)];
   if (la && la === lb) return true;
-  if (la && lb && platformOf(a.link) && platformOf(a.link) === platformOf(b.link)) return false;
+  if (la && lb && platformOf(a.link) && platformOf(a.link) === platformOf(b.link)) {
+    const [x, y] = [nameKey(a.name, { keepBrackets: true }), nameKey(b.name, { keepBrackets: true })];
+    return Boolean(x) && x === y;
+  }
   return sameName(a.name, b.name);
 }
 

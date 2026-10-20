@@ -4,7 +4,7 @@ const ALLOWED_STATES_CITIES = [
       'kochi', 'cochin', 'ernakulam', 'trivandrum', 'thiruvananthapuram', 'kozhikode', 'calicut', 'thrissur', 'trichur',
       'kollam', 'quilon', 'kottayam', 'palakkad', 'palghat', 'kannur', 'cannanore', 'malappuram', 'alappuzha', 'alleppey',
       'kasaragod', 'wayanad', 'idukki', 'pathanamthitta', 'karunagappally', 'kothamangalam', 'nilambur', 'nalanchira', 'thodiyoor',
-      'chennai', 'madras', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
+      'chennai', 'madras', 'vandalur', 'tambaram', 'guindy', 'chengalpattu', 'coimbatore', 'kovai', 'madurai', 'tiruchirappalli', 'trichy', 'salem', 'tirunelveli',
       'erode', 'vellore', 'thanjavur', 'dindigul', 'tiruppur', 'tirupur', 'kanchipuram', 'kancheepuram', 'karur', 'nagercoil',
       'hosur', 'theni', 'sivakasi', 'virudhunagar', 'kattankulathur', 'cuddalore', 'kumbakonam', 'pollachi',
       'bengaluru', 'bangalore', 'mysuru', 'mysore', 'mangaluru', 'mangalore', 'hubballi', 'hubli', 'belagavi',
@@ -103,9 +103,9 @@ const hasPrizeMoney = prize => PRIZE_MONEY.test(String(prize || ''));
 
 function shouldKeepHackathon(event) {
   const h = classifyAttendance(event);
-  // An online hackathon is only worth a reminder when it is free to enter
-  // and pays prize money.
-  if (h.mode === 'online') return !isPaid(h.fee) && hasPrizeMoney(h.prize);
+  // Every online hackathon is kept. The calendar colours it blue when it is
+  // free to enter and pays prize money, purple otherwise.
+  if (h.mode === 'online') return true;
   if (h.mode !== 'offline' || isGeneric(h.location)) return false;
   // Explicit excluded states take precedence over a matching city or organizer name.
   if (matches(h.location, EXCLUDED_PLACES)) return false;
@@ -113,7 +113,6 @@ function shouldKeepHackathon(event) {
 }
 function leftOutReason(event) {
   const h = classifyAttendance(event);
-  if (h.mode === 'online') return isPaid(h.fee) ? `online with registration fee ${h.fee}` : `online without prize money (prize: ${h.prize || 'none'})`;
   return `${h.mode}, venue "${String(h.location || '').slice(0, 60)}" is not in Kerala/Tamil Nadu/Karnataka`;
 }
 function keralaPriority(event) {

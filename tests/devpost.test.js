@@ -33,9 +33,11 @@ test('Devpost cards become deadline reminders with the existing location colors'
   }
 });
 
-test('Devpost excludes online with no cash, outside venues, and listings with no usable deadline', () => {
-  assert.equal(parseDevpostListing(card('No Prize', 'Online', '$<span data-currency-value>0</span>'), now), null);
-  assert.equal(parseDevpostListing(card('Other Prize', 'Online', '$1,250', { prizes_counts: { cash: 0, other: 3 } }), now), null);
+test('Devpost keeps online with no cash (unranked), and excludes outside venues and listings with no usable deadline', () => {
+  const noCash = parseDevpostListing(card('No Prize', 'Online', '$<span data-currency-value>0</span>'), now);
+  assert.equal(noCash.prize, null);
+  assert.equal(noCash.prizeUsd, 0);
+  assert.equal(parseDevpostListing(card('Other Prize', 'Online', '$1,250', { prizes_counts: { cash: 0, other: 3 } }), now).prize, null);
   // Offline in the south is kept with no prize at all.
   for (const place of ['Kochi, Kerala', 'Chennai, Tamil Nadu', 'Bengaluru, Karnataka']) {
     const free = parseDevpostListing(card(`Free ${place}`, place, '$<span data-currency-value>0</span>', { prizes_counts: { cash: 0, other: 0 } }), now);

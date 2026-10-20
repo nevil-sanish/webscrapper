@@ -8,6 +8,7 @@ const { scrapeDevfolio } = require('./sites/devfolio');
 const { scrapeUnstop } = require('./sites/unstop');
 const { scrapeDevpost } = require('./sites/devpost');
 const { scrapeSheet } = require('./sites/sheet');
+const { scrapeHackIndia } = require('./sites/hackindia');
 
 // Utils
 const { deduplicateHackathons } = require('./utils/dedup');
@@ -92,7 +93,9 @@ async function run() {
     ...await collect('Unstop', scrapeUnstop),
     // 3. Devpost (https://devpost.com/hackathons): top prize pools and top companies only
     ...await collect('Devpost', scrapeDevpost),
-    // 4. The ChaiCoders tracking sheet, "Hackathon" and "claude" tabs. It can
+    // 4. HackIndia (https://hackindia.org/hackathons): upcoming ones only, each from its own page
+    ...await collect('HackIndia', scrapeHackIndia, { expectResults: false }),
+    // 5. The ChaiCoders tracking sheet, "Hackathon" and "claude" tabs. It can
     //    legitimately have nothing still open, so an empty result is not a failure.
     ...await collect('Sheet', scrapeSheet, { expectResults: false }),
     // Web search discovery (search/discovery.js) is switched off at the owner's request.

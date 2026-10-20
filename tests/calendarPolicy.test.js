@@ -5,9 +5,13 @@ const { getEventColorId, maintainCalendar } = require('../scraper/utils/calendar
 const description = 'Mode: offline\nLocation: Thrissur, Kerala\nLink: https://example.org/hackathon';
 const now = new Date('2026-09-18T06:00:00Z');
 
-test('Kerala green overrides mode; other online blue and offline red', () => {
+test('Kerala green overrides mode; online blue with prize money and free entry, else purple; offline red', () => {
   for (const mode of ['offline', 'online', 'hybrid']) assert.equal(getEventColorId({ location: 'Kasaragod', mode }), '10');
-  assert.equal(getEventColorId({ location: 'Online', mode: 'online' }), '9');
+  assert.equal(getEventColorId({ location: 'Online', mode: 'online', prize: '$1,000' }), '9');
+  assert.equal(getEventColorId({ location: 'Online', mode: 'online', prize: '$1,000', fee: 'Free' }), '9');
+  assert.equal(getEventColorId({ location: 'Online', mode: 'online' }), '3');
+  assert.equal(getEventColorId({ location: 'Online', mode: 'online', prize: 'Certificates' }), '3');
+  assert.equal(getEventColorId({ location: 'Online', mode: 'online', prize: '$1,000', fee: '₹100' }), '3');
   assert.equal(getEventColorId({ location: 'Chennai', mode: 'offline' }), '11');
 });
 test('Kerala titles sort first and title migration is idempotent', () => {
@@ -21,14 +25,16 @@ test('titles carry a colour dot every viewer of a shared calendar sees', () => {
   const titled = h => calendarSummary(h, getEventColorId(h));
   const kerala = titled({ name: 'Devin Hacks Kochi', location: 'Kochi, Kerala', mode: 'offline' });
   const south = titled({ name: 'DevHack 2026', location: 'Mangaluru, Karnataka', mode: 'offline' });
-  const online = titled({ name: 'PayPal AI Hackathon', location: 'Online', mode: 'online' });
+  const online = titled({ name: 'PayPal AI Hackathon', location: 'Online', mode: 'online', prize: '$67,500' });
+  assert.equal(titled({ name: 'The Outpost', location: 'Online', mode: 'online', prize: 'Certificates' }), '2 · 🟣 The Outpost');
   assert.equal(kerala, '1 · 🟢 Kerala · Devin Hacks Kochi');
   assert.equal(south, '2 · 🔴 DevHack 2026');
   assert.equal(online, '2 · 🔵 PayPal AI Hackathon');
   // Kerala still sorts first, and old or re-titled names come back unchanged.
   assert.deepEqual([online, south, kerala].sort()[0], kerala);
   for (const t of [kerala, south, online, '1 · Kerala · Devin Hacks Kochi', '2 · DevHack 2026']) {
-    assert.equal(titled({ name: t, location: 'Online', mode: 'online' }), `2 · 🔵 ${originalName(t)}`);
+    assert.equal(titled({ name: t, location: 'Online', mode: 'online', prize: '$5,000' }), `2 · 🔵 ${originalName(t)}`);
+    assert.equal(originalName(`2 · 🟣 ${originalName(t)}`), originalName(t));
   }
   assert.equal(originalName(south), 'DevHack 2026');
 });
@@ -110,9 +116,13 @@ test('a hackathon with the same name and closing date is one hackathon, whatever
   assert.equal(isSameHackathon(devhack, { name: 'DevHost', day: '2026-10-22', link: 'https://unstop.com/hackathons/devhack-1759829?lb=x' }), true);
   // Same name, another day.
   assert.equal(isSameHackathon(devhack, { ...devhack, day: '2026-10-23' }), false);
-  // Two listings on one platform stay apart.
+  // Two listings on one platform stay apart unless named the same outright.
   assert.equal(isSameHackathon({ name: 'Avishkaar Season 4', day: '2026-10-25', link: 'https://unstop.com/hackathons/a-1' },
     { name: 'Avishkaar Season 4 (Virtual)', day: '2026-10-25', link: 'https://unstop.com/hackathons/a-2' }), false);
+  assert.equal(isSameHackathon({ name: 'BUiLDX ', day: '2026-11-10', link: 'https://unstop.com/hackathons/buildx-36-hours-online-hackathon-code-a-nova-1758745' },
+    { name: 'BUiLDX Hackathon', day: '2026-11-10', link: 'https://unstop.com/hackathons/buildx-hackathon-code-a-nova-1760074' }), true);
+  assert.equal(isSameHackathon({ name: 'Agentic AI Hackathon', day: '2026-10-31', link: 'https://unstop.com/hackathons/a-1' },
+    { name: 'AI Product Hackathon', day: '2026-10-31', link: 'https://unstop.com/hackathons/a-2' }), false);
 });
 
 test('maintenance removes the extra copy of a hackathon and keeps the platform-linked one', async () => {

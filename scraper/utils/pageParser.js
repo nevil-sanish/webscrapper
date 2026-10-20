@@ -159,7 +159,10 @@ function parseExactHackathonPage(html, pageUrl, options = {}) {
       const checkObj = (obj) => {
         if (!obj || typeof obj !== 'object') return false;
         const type = String(obj['@type'] || '').toLowerCase();
-        return type.includes('event') || type.includes('hackathon') || type.includes('competition');
+        // Zoho Backstage labels its events "EDUCATION": anything with a start
+        // date and a venue is read as the event.
+        return type.includes('event') || type.includes('hackathon') || type.includes('competition') ||
+          Boolean(obj.startDate && obj.location);
       };
 
       if (Array.isArray(data)) {
@@ -314,11 +317,13 @@ function parseExactHackathonPage(html, pageUrl, options = {}) {
   }
 
   // D. Explicit registration validity only; event start is not a registration deadline.
+  // A ticket on sale until the event ends is still a reminder for the day the
+  // event starts at the latest: registering after it has begun is too late.
   if (!registrationEndDate && jsonLdEvent) {
-    if (jsonLdEvent.offers?.validThrough) {
-      registrationEndDate = parseDateToYMD(jsonLdEvent.offers.validThrough);
-
-    }
+    const offers = [].concat(jsonLdEvent.offers || []);
+    const sales = offers.map(o => parseDateToYMD(String(o?.validThrough || ''))).filter(Boolean).sort();
+    const starts = parseDateToYMD(String(jsonLdEvent.startDate || ''));
+    if (sales.length) registrationEndDate = starts && sales[sales.length - 1] > starts ? starts : sales[sales.length - 1];
   }
 
   // E. Check Next.js / React script tags for reg_ends_at or dates
@@ -355,6 +360,8 @@ function parseExactHackathonPage(html, pageUrl, options = {}) {
   if (feeMatch) {
     fee = feeMatch[1].trim();
   }
+  const ticket = [].concat(jsonLdEvent?.offers || []).find(o => Number(o?.price) > 0);
+  if (fee === 'Free' && ticket) fee = `${!ticket.priceCurrency || ticket.priceCurrency === 'INR' ? '₹' : `${ticket.priceCurrency} `}${ticket.price}`;
 
   const desc = $('meta[property="og:description"]').attr('content') ||
                $('meta[name="description"]').attr('content') ||

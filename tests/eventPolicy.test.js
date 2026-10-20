@@ -5,15 +5,19 @@ const { deduplicateHackathons } = require('../scraper/utils/dedup');
 const { parseExactHackathonPage } = require('../scraper/utils/pageParser');
 const { keralaDistricts, keralaKeywords, searchKeywords } = require('../scraper/search/keywordList');
 
-test('online events are kept only with prize money, irrespective of location', () => {
+test('online events are always kept, irrespective of location, prize or fee', () => {
+  const { hasPrizeMoney } = require('../scraper/utils/eventPolicy');
   for (const location of ['', 'Online', 'Delhi']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location, prize: '$1,000' }), true);
+    for (const prize of ['$1,000', null]) for (const fee of ['Free', '₹100']) {
+      assert.equal(shouldKeepHackathon({ mode: 'online', location, prize, fee }), true);
+    }
   }
+  // Prize money is what tells the calendar's blue from purple.
   for (const prize of ['$67,500', '₹1,00,000', '₹100000', 'Total Cashprize: INR 20,000', '75k', '2.8 lakhs', 'Rs. 5000']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', prize }), true, prize);
+    assert.equal(hasPrizeMoney(prize), true, prize);
   }
   for (const prize of [null, '', 'Winner 2026', 'Prizes for top 3', 'PS5 + swag', '$0', 'Winner, Runner Up']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', prize }), false, String(prize));
+    assert.equal(hasPrizeMoney(prize), false, String(prize));
   }
 });
 test('offline and hybrid events require an allowed physical location', () => {
@@ -90,4 +94,15 @@ test('an offline page with no venue label takes its venue card, and a venue outs
   const delhi = classifyAttendance({ mode: 'unknown', location: '' },
     '<div>IIT Delhi, New Delhi</div><p>A 24-hour offline hackathon on campus.</p>');
   assert.equal(shouldKeepHackathon(delhi), false);
+});
+
+test('offline hackathons are kept or left out by place alone, whatever their prize or fee', () => {
+  for (const prize of [null, '', 'Certificates', '₹1,00,000']) for (const fee of ['Free', '₹1017', 'Paid']) {
+    for (const location of ['Kochi, Kerala', 'Vandalur, Chennai', 'Mangaluru, Karnataka']) {
+      assert.equal(shouldKeepHackathon({ mode: 'offline', location, prize, fee }), true, `${location} ${prize} ${fee}`);
+    }
+    for (const location of ['Noida, Uttar Pradesh', 'Hyderabad, Telangana', 'Pune']) {
+      assert.equal(shouldKeepHackathon({ mode: 'offline', location, prize, fee }), false, `${location} ${prize} ${fee}`);
+    }
+  }
 });

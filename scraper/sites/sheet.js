@@ -8,6 +8,7 @@ const { getWithRetry, sleep } = require('../utils/http');
 const { parseUnstopCompetition } = require('./unstop');
 const { parseDevpostListing } = require('./devpost');
 const { resolveRegistrationDeadline, devfolioPrize } = require('./devfolio');
+const { parseHackIndiaPage } = require('./hackindia');
 
 // The ChaiCoders tracking sheet. Only the link column (I) of each row is used:
 // every hackathon is read from its own page, never from what the sheet says.
@@ -117,6 +118,7 @@ async function scrapeLink(url, { get = httpGet, now = new Date() } = {}) {
   if (host.endsWith('.devpost.com')) return fromDevpost(url, ctx);
   if (host.endsWith('.devfolio.co')) return fromDevfolio(url, ctx);
   if (host === 'luma.com' || host === 'lu.ma') return fromLuma(url, ctx);
+  if (host === 'hackindia.org') return parseHackIndiaPage(await get(url), url, now);
   return fromPage(url, ctx);
 }
 
