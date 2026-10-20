@@ -75,6 +75,13 @@ function classifyAttendance(event, content = '') {
     }).find(line => matches(line, ALLOWED_STATES_CITIES));
     if (nearby) resolvedLocation = nearby;
   }
+  // A venue card on its own line: "CUSAT, Kochi, Kerala". Excluded places
+  // count too, so a Delhi card still leaves the event out.
+  if (isOffline && isGeneric(resolvedLocation)) {
+    const named = lines.filter(line => line.length <= 60 && matches(line, KNOWN_PLACES));
+    const card = named.find(line => line.includes(',')) || named[0];
+    if (card) resolvedLocation = card;
+  }
   // The source lists the event as online and no venue can be found for the
   // in-person wording (an optional offline track, a finale to be announced).
   // Dropping it would hide an event that can be entered from anywhere.
@@ -89,15 +96,25 @@ function classifyAttendance(event, content = '') {
 
 // "Free", "₹0" and a missing fee are free; "Paid" or any positive amount is not.
 const isPaid = fee => /paid/i.test(fee || '') || Number(String(fee || '').replace(/[^\d.]/g, '')) > 0;
+// "$2,000", "₹100000", "INR 20,000", "75k", "2.8 lakhs" - but not "Winner 2026",
+// "Prizes for top 3" or "PS5 + swag".
+const PRIZE_MONEY = /(?:[$₹€£]|\b(?:inr|rs\.?|usd|eur)\s*)\s*[1-9]|\b[1-9][\d.]*\s*(?:k|lakhs?|lacs?|lpa|cr|crores?)\b|\b[1-9]\d{0,2}(?:,\d{2,3})+\b/i;
+const hasPrizeMoney = prize => PRIZE_MONEY.test(String(prize || ''));
 
 function shouldKeepHackathon(event) {
   const h = classifyAttendance(event);
-  // An online hackathon that charges to register is not worth a reminder.
-  if (h.mode === 'online') return !isPaid(h.fee);
+  // An online hackathon is only worth a reminder when it is free to enter
+  // and pays prize money.
+  if (h.mode === 'online') return !isPaid(h.fee) && hasPrizeMoney(h.prize);
   if (h.mode !== 'offline' || isGeneric(h.location)) return false;
   // Explicit excluded states take precedence over a matching city or organizer name.
   if (matches(h.location, EXCLUDED_PLACES)) return false;
   return matches(h.location, ALLOWED_STATES_CITIES);
+}
+function leftOutReason(event) {
+  const h = classifyAttendance(event);
+  if (h.mode === 'online') return isPaid(h.fee) ? `online with registration fee ${h.fee}` : `online without prize money (prize: ${h.prize || 'none'})`;
+  return `${h.mode}, venue "${String(h.location || '').slice(0, 60)}" is not in Kerala/Tamil Nadu/Karnataka`;
 }
 function keralaPriority(event) {
   return matches(event.location || '', KERALA_PLACES) ? 1 : 0;
@@ -107,4 +124,4 @@ function contentText(value) {
   if (!value || typeof value !== 'object') return '';
   return Object.values(value).map(contentText).filter(Boolean).join('\n');
 }
-module.exports = { classifyAttendance, shouldKeepHackathon, keralaPriority, plainText, contentText };
+module.exports = { classifyAttendance, shouldKeepHackathon, keralaPriority, plainText, contentText, isPaid, hasPrizeMoney, leftOutReason };

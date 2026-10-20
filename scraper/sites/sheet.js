@@ -1,18 +1,20 @@
 const { google } = require('googleapis');
-const { parseDateToYMD } = require('../utils/pageParser');
-const { shouldKeepHackathon, keralaPriority } = require('../utils/eventPolicy');
+const cheerio = require('cheerio');
+const { parseDateToYMD, parseExactHackathonPage } = require('../utils/pageParser');
+const { classifyAttendance, shouldKeepHackathon, plainText, leftOutReason } = require('../utils/eventPolicy');
 const { localDay } = require('../utils/calendarPolicy');
 const { getGoogleAuth } = require('../utils/calendar');
+const { getWithRetry, sleep } = require('../utils/http');
+const { parseUnstopCompetition } = require('./unstop');
+const { parseDevpostListing } = require('./devpost');
+const { resolveRegistrationDeadline, devfolioPrize } = require('./devfolio');
 
-// The ChaiCoders tracking sheet. Both tabs share one layout: Hackathon,
-// Description, Date, Closing Date, Idea, Prize Pool, Location, Registration, Links.
+// The ChaiCoders tracking sheet. Only the link column (I) of each row is used:
+// every hackathon is read from its own page, never from what the sheet says.
 const SHEET_ID = '1WXg2j6eZT5bY7vxIBkQUQaJVEDRMjI5BMOr0I_U7MQc';
-const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
 const TABS = ['Hackathon', 'claude'];
-
-// "$2,000", "₹1,00,000", "40,000", "75k", "2.8L", "1 Lk", "105000" - but not
-// "Prizes for top 3" or "PS5 + Devin Max plans".
-const MONEY = /[$₹€£]\s*\d|\d\s*(?:k|l|lk|lakhs?|cr|crores?)\b|\d{1,3}(?:,\d{2,3})+|\d{4,}/i;
+const LINK_COLUMN = 8;
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 async function readTab(tab) {
   const auth = getGoogleAuth();
@@ -21,48 +23,113 @@ async function readTab(tab) {
   return res.data.values || [];
 }
 
-// Returns the event, or a string saying why the row is left out.
-function parseSheetRow(row, headers, tab, now = new Date()) {
-  const cell = name => String(row[headers.indexOf(name)] ?? '').trim();
-  const name = cell('Hackathon');
-  if (!name) return 'no name';
-  const closing = parseDateToYMD(cell('Closing Date'));
-  if (!closing) return 'no closing date';
-  if (closing < localDay(now)) return `closing date ${closing} has passed`;
+const httpGet = (url, accept = 'text/html') =>
+  getWithRetry(url, { headers: { 'User-Agent': USER_AGENT, Accept: accept }, family: 4, timeout: 15000 }, { delayMs: 1000 })
+    .then(res => res.data);
 
-  const shownLocation = cell('Location');
-  const prize = cell('Prize Pool');
-  const base = {
-    name,
-    source: 'sheet',
-    sourceUrl: cell('Links').match(/https?:\/\/\S+/)?.[0] || '',
-    attendanceAnalyzed: true,
-    startDate: closing,
-    endDate: closing,
-    registrationDeadline: closing,
-    eventConductedDate: parseDateToYMD(cell('Date')) || undefined,
-    prize: prize || undefined,
-    description: `From the ${tab} tab of ${SHEET_URL}${shownLocation ? `\nLocation in sheet: ${shownLocation}` : ''}`
-  };
-
-  // A venue in Kerala, Tamil Nadu or Karnataka wins, even for an online first
-  // round: "Online PPT round -> offline in Mangaluru" is an offline reminder.
-  const offline = { ...base, mode: 'offline', location: shownLocation };
-  if (shouldKeepHackathon(offline)) return { ...offline, isKeralaRelevant: Boolean(keralaPriority(offline)) };
-  if (/\b(?:online|virtual|remote)\b/i.test(shownLocation)) {
-    if (!MONEY.test(prize)) return `online without prize money ("${prize}")`;
-    return { ...base, mode: 'online', location: 'Online', isKeralaRelevant: false };
-  }
-  return shownLocation ? `offline outside Kerala/Tamil Nadu/Karnataka ("${shownLocation}")` : 'no location';
+async function fromUnstop(url, { get, today }) {
+  const id = new URL(url).pathname.match(/-(\d+)\/?$/)?.[1];
+  if (!id) return 'no Unstop id in the link';
+  const comp = (await get(`https://unstop.com/api/public/competition/${id}`, 'application/json'))?.data?.competition;
+  const result = parseUnstopCompetition(comp, { id, today });
+  return result.event || result.skipped;
 }
 
-async function scrapeSheet({ read = readTab, now = new Date() } = {}) {
-  console.log('Reading the ChaiCoders hackathon sheet...');
-  const events = [];
-  const stats = { source: 'sheet', reported: 0, listed: 0, failedPages: 0, skippedItems: [], complete: false };
-  events.stats = stats;
-  const seen = new Set();
+async function fromDevpost(url, { get, now }) {
+  const sub = new URL(url).hostname.split('.')[0];
+  const data = await get(`https://devpost.com/api/hackathons?search=${encodeURIComponent(sub)}`, 'application/json');
+  const listing = (data?.hackathons || []).find(h => h.url && new URL(h.url).hostname.split('.')[0] === sub);
+  if (!listing) return fromPage(url, { get, now });
+  // Same rules as the Devpost scraper: still open, and online ones need a cash prize.
+  return parseDevpostListing(listing, now) || `left out by the Devpost rules (${listing.time_left_to_submission || 'closed'})`;
+}
 
+async function fromDevfolio(url, { get, now }) {
+  const sourceUrl = `https://${new URL(url).hostname}`;
+  const $ = cheerio.load(String(await get(sourceUrl)));
+  let h;
+  try { h = JSON.parse($('#__NEXT_DATA__').html())?.props?.pageProps?.hackathon; } catch (e) {}
+  if (!h?.name) return 'no hackathon data on the Devfolio page';
+  const bodyText = plainText($('body').html());
+  const deadline = resolveRegistrationDeadline({ timerTimestamp: h.settings?.reg_ends_at || h.reg_ends_at, bodyText, now });
+  if (!deadline) return 'registration closed';
+  const location = h.location || [h.city, h.state].filter(Boolean).join(', ') || (h.is_online ? 'Online' : '');
+  return classifyAttendance({
+    name: h.name.trim(),
+    source: 'devfolio',
+    sourceUrl,
+    mode: h.settings?.is_hybrid ? 'both' : (h.is_online === false ? 'offline' : 'online'),
+    location,
+    fee: h.settings?.paid ? (h.settings.fee_amount ? `₹${h.settings.fee_amount}` : 'Paid') : 'Free',
+    prize: devfolioPrize(h.prizes),
+    startDate: deadline,
+    endDate: parseDateToYMD(h.ends_at || '') || deadline,
+    registrationDeadline: deadline,
+    eventConductedDate: parseDateToYMD(h.starts_at || ''),
+    eventEndDate: parseDateToYMD(h.ends_at || ''),
+    description: h.desc ? h.desc.slice(0, 300) : null
+  }, `${bodyText} ${h.desc || ''}`);
+}
+
+// Luma registration stays open until the event starts.
+async function fromLuma(url, { get, today }) {
+  const slug = new URL(url).pathname.split('/').filter(Boolean).pop();
+  const data = await get(`https://api.lu.ma/url?url=${encodeURIComponent(slug)}`, 'application/json');
+  const e = data?.data?.event;
+  if (!e?.name) return 'not found on Luma';
+  const starts = e.start_at && localDay(new Date(e.start_at), e.timezone || 'Asia/Kolkata');
+  if (!starts || starts < today) return 'registration closed';
+  const ends = e.end_at && localDay(new Date(e.end_at), e.timezone || 'Asia/Kolkata');
+  const offline = e.location_type === 'offline';
+  return classifyAttendance({
+    name: e.name.trim(),
+    source: 'sheet',
+    sourceUrl: url,
+    mode: offline ? 'offline' : 'online',
+    location: offline ? (e.geo_address_info?.full_address || e.geo_address_info?.city_state || '') : 'Online',
+    fee: data.data.ticket_info?.is_free === false ? 'Paid' : 'Free',
+    startDate: starts,
+    endDate: ends || starts,
+    registrationDeadline: starts,
+    eventConductedDate: starts,
+    eventEndDate: ends || null,
+    attendanceAnalyzed: true
+  });
+}
+
+async function fromPage(url, { get, now }) {
+  const diagnostics = {};
+  const p = parseExactHackathonPage(String(await get(url)), url, { now, diagnostics });
+  if (!p) return diagnostics.reason || 'no hackathon found on the page';
+  return {
+    ...p,
+    location: p.place || (p.mode === 'online' ? 'Online' : ''),
+    endDate: p.eventEndDate || p.registrationDeadline,
+    source: 'sheet'
+  };
+}
+
+// Returns the event read from the link's own page, or a string saying why there is none.
+async function scrapeLink(url, { get = httpGet, now = new Date() } = {}) {
+  const host = new URL(url).hostname.replace(/^www\./, '');
+  const ctx = { get, now, today: localDay(now) };
+  if (host === 'unstop.com') return fromUnstop(url, ctx);
+  if (host.endsWith('.devpost.com')) return fromDevpost(url, ctx);
+  if (host.endsWith('.devfolio.co')) return fromDevfolio(url, ctx);
+  if (host === 'luma.com' || host === 'lu.ma') return fromLuma(url, ctx);
+  return fromPage(url, ctx);
+}
+
+const linkOf = row => String(row[LINK_COLUMN] ?? '').match(/https?:\/\/[^\s,]+/)?.[0];
+
+async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } = {}) {
+  console.log('Reading the links in the ChaiCoders hackathon sheet...');
+  const events = [];
+  const stats = { source: 'sheet', reported: 0, listed: 0, failedPages: 0, failedDetails: 0, skippedItems: [], complete: false };
+  events.stats = stats;
+
+  // The same hackathon is often listed twice, in one tab or across both.
+  const links = new Map();
   for (const tab of TABS) {
     let rows;
     try {
@@ -72,29 +139,39 @@ async function scrapeSheet({ read = readTab, now = new Date() } = {}) {
       console.error(`Sheet tab "${tab}" failed: ${error.message}`);
       continue;
     }
-    const [headers = [], ...data] = rows;
-    for (const row of data) {
-      if (!row.some(value => String(value).trim())) continue;
-      stats.reported++;
-      stats.listed++;
-      const result = parseSheetRow(row, headers.map(h => String(h).trim()), tab, now);
-      if (typeof result === 'string') {
-        stats.skippedItems.push({ name: `${row[headers.indexOf('Hackathon')] || '(blank)'} [${tab}]`, url: '', reason: result });
-        continue;
-      }
-      // The same hackathon can be listed twice, in one tab or across both. The
-      // Hackathon tab is read first, so the row that has a link is the one kept.
-      const keys = [result.sourceUrl, result.name.toLowerCase()].filter(Boolean);
-      if (keys.some(key => seen.has(key))) continue;
-      keys.forEach(key => seen.add(key));
-      events.push(result);
+    for (const row of rows.slice(1)) {
+      const url = linkOf(row);
+      if (url && !links.has(url)) links.set(url, `${String(row[0] || '').trim()} [${tab}]`);
     }
   }
+  stats.reported = stats.listed = links.size;
 
+  const seen = new Set();
+  for (const [url, label] of links) {
+    let result;
+    try {
+      result = await scrapeLink(url, { get, now });
+    } catch (error) {
+      result = `page could not be read (${error.response?.status || error.code || error.message})`;
+    }
+    if (typeof result === 'string') {
+      stats.skippedItems.push({ name: label, url, reason: result });
+    } else if (!shouldKeepHackathon(result)) {
+      stats.skippedItems.push({ name: label, url, reason: leftOutReason(result) });
+    } else if (!seen.has(result.sourceUrl)) {
+      seen.add(result.sourceUrl);
+      events.push(result);
+    }
+    await sleep(100);
+  }
+
+  // A link whose page is down or unreadable is reported as skipped, not as a
+  // failed run: these are hand-picked sites, not a platform listing.
   stats.complete = stats.failedPages === 0;
-  console.log(`Extracted ${events.length} eligible hackathons from ${stats.listed} sheet rows` +
+  console.log(`Extracted ${events.length} eligible hackathons from ${links.size} sheet links` +
     `${stats.complete ? '.' : ` - INCOMPLETE: ${stats.failedPages} tab(s) failed.`}`);
+  for (const item of stats.skippedItems) console.log(`  sheet skipped: ${item.name} - ${item.reason} (${item.url})`);
   return events;
 }
 
-module.exports = { scrapeSheet, parseSheetRow };
+module.exports = { scrapeSheet, scrapeLink };

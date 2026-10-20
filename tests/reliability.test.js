@@ -55,16 +55,20 @@ test('a sentence in the description does not replace the venue the listing state
 
 test("Unstop's own round metadata is not read as in-person attendance", () => {
   const { event } = parseUnstopCompetition({ title: 'Catalyst Hackathon', region: 'online', regnRequirements: open,
+    prizes: [{ cash: 30000 }, { cash: 20000 }, { cash: null }],
     details: '<p>An online hackathon to build solutions.</p>',
     rounds: [{ details: [{ title: 'Idea Submission', seo_data: {
       title: 'Offline Round as part of Catalyst Hackathon', public_url: '/hackathons/catalyst-1/offline-round/2' } }] }]
   }, { today });
   assert.equal(event.mode, 'online');
+  // "Prizes worth" on Unstop is the sum of each prize's cash.
+  assert.equal(event.prize, '₹50,000');
   assert.equal(shouldKeepHackathon(event), true);
+  assert.equal(shouldKeepHackathon({ ...event, prize: null }), false);
 });
 
 test('an online listing stays online when in-person wording names no venue', () => {
-  const online = { mode: 'online', location: 'Online' };
+  const online = { mode: 'online', location: 'Online', prize: '$1,000' };
   for (const text of [
     'Hybrid grand finale. Teams willing to travel to the venue can participate physically at the venue.',
     'Offline track: optional. Online track: open to all.',
@@ -81,7 +85,7 @@ test('an online listing stays online when in-person wording names no venue', () 
 });
 
 test('two listings on one platform stay separate; the same event from two sources merges', () => {
-  const base = { startDate: '2030-10-25', mode: 'online', location: 'Online', attendanceAnalyzed: true };
+  const base = { startDate: '2030-10-25', mode: 'online', location: 'Online', prize: '₹50,000', attendanceAnalyzed: true };
   const offline = { ...base, name: 'Avishkaar Season 4 Hackathon: A National-Level Innovation Challenge', source: 'unstop',
     sourceUrl: 'https://unstop.com/hackathons/a-1', mode: 'offline', location: 'Tekkali, Andhra Pradesh' };
   const virtual = { ...base, name: 'Avishkaar Season 4 (Virtual) Hackathon: A National-Level Innovation Challenge', source: 'unstop',
@@ -169,16 +173,21 @@ test('a venue too small to recognise is resolved from the description', () => {
 test('online hackathons that charge a registration fee are left out', () => {
   const { fromCalendar } = require('../scraper/utils/calendarPolicy');
   for (const fee of ['₹500', 'Rs. 1,500', 'Paid', '200']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee }), false, fee);
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), false, fee);
   }
   for (const fee of ['Free', '₹0', '', null, undefined]) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee }), true, String(fee));
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', fee, prize: '$5,000' }), true, String(fee));
   }
   // An offline event in an allowed state may charge.
   assert.equal(shouldKeepHackathon({ mode: 'offline', location: 'Kochi, Kerala', fee: '₹500' }), true);
   // Maintenance sees the fee of an entry already in the calendar.
   const stored = fromCalendar({ summary: '2 · Paid Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nRegistration Fee: ₹299\n' });
   assert.equal(shouldKeepHackathon(stored), false);
+  // ...and its prize, so an online reminder with prize money is not removed.
+  const withPrize = fromCalendar({ summary: '2 · Rich Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\nPrize: $10,000\n' });
+  assert.equal(shouldKeepHackathon(withPrize), true);
+  const noPrize = fromCalendar({ summary: '2 · Poor Hack', description: 'Mode: online\nLocation: Online\nLink: https://x.test\n' });
+  assert.equal(shouldKeepHackathon(noPrize), false);
 });
 
 test('numeric dates are read the Indian way, day first', () => {

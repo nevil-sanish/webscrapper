@@ -1,5 +1,5 @@
 const stringSimilarity = require('string-similarity');
-const { normalizeName, normalizeDate } = require('./normalize');
+const { normalizeName, normalizeDate, isSameHackathon } = require('./normalize');
 const { localDay } = require('./calendarPolicy');
 
 // A platform lists each of its events once, under its own URL. Two of its
@@ -40,8 +40,14 @@ function deduplicateHackathons(hackathons) {
 
     let match = null;
 
+    const day = dateNew && localDay(dateNew);
     for (let ex of uniqueList) {
       if (separateListings(h, ex)) continue;
+      if (day && isSameHackathon({ name: h.name, day, link: h.sourceUrl },
+        { name: ex.name, day: ex.startDate && localDay(ex.startDate), link: ex.sourceUrl })) {
+        match = ex;
+        break;
+      }
       const normNameEx = normalizeName(ex.name);
       const similarity = stringSimilarity.compareTwoStrings(normNameNew, normNameEx);
 

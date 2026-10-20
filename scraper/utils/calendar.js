@@ -1,6 +1,7 @@
 const { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
 const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
+const { isSameHackathon } = require('./normalize');
 const { keralaPriority } = require('./eventPolicy');
 const { google } = require('googleapis');
 require('dotenv').config();
@@ -63,7 +64,7 @@ const linkOf = description => String(description || '').match(/^Link:[ \t]*(\S+)
  */
 async function getExistingCalendarEvents() {
   if (cachedCalendarEvents) return cachedCalendarEvents;
-  const index = { byLink: new Map(), byName: new Map(), claimed: new Set() };
+  const index = { byLink: new Map(), byName: new Map(), claimed: new Set(), all: [] };
   if (!calendar) return index;
 
   let pageToken;
@@ -87,6 +88,7 @@ async function getExistingCalendarEvents() {
           description: item.description || ''
         };
         index.byName.set(originalName(item.summary).trim().toLowerCase(), entry);
+        index.all.push(entry);
         if (linkOf(entry.description)) index.byLink.set(linkOf(entry.description), entry);
       }
     }
@@ -100,12 +102,17 @@ async function getExistingCalendarEvents() {
 // The link identifies a listing. The name is the fallback for a hackathon found
 // through a different source than last time, but an entry already matched in
 // this run belongs to another listing that merely shares the name.
-function findExisting(index, hackathon) {
+function findExisting(index, hackathon, day) {
   const byLink = hackathon.sourceUrl && index.byLink.get(hackathon.sourceUrl);
   if (byLink) return byLink;
   const byName = index.byName.get(hackathon.name.trim().toLowerCase());
-  return byName && !index.claimed.has(byName.id) ? byName : null;
+  if (byName && !index.claimed.has(byName.id)) return byName;
+  // Listed elsewhere under a slightly different name, closing the same day.
+  const me = { name: hackathon.name, day, link: hackathon.sourceUrl };
+  return index.all.find(entry => !index.claimed.has(entry.id) && isSameHackathon(me, asListing(entry))) || null;
 }
+
+const asListing = item => ({ name: originalName(item.summary || ''), day: registrationDeadlineDay(item), link: linkOf(item.description) });
 
 function remember(index, hackathon, entry) {
   for (const [link, known] of index.byLink) if (known === entry) index.byLink.delete(link);
@@ -265,7 +272,7 @@ async function addEventToCalendar(hackathon) {
   // Kerala green, other online blue, other offline red.
   const colorId = getEventColorId(hackathon);
   const colorName = getColorName(colorId);
-  const summary = calendarSummary(hackathon);
+  const summary = calendarSummary(hackathon, colorId);
 
   // Event description with full details
   let desc = `Mode: ${hackathon.mode || 'Unknown'}\n`;
@@ -293,7 +300,7 @@ async function addEventToCalendar(hackathon) {
 
   // Check against existing calendar events
   const index = await getExistingCalendarEvents();
-  const existing = findExisting(index, hackathon);
+  const existing = findExisting(index, hackathon, toDay(hackathon.registrationDeadline) || startDateStr);
 
   if (existing) {
     remember(index, hackathon, existing);
@@ -417,19 +424,31 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
   let deleted = 0;
   let updated = 0;
   let failed = 0;
-  for (const item of items) {
+  // Of two copies of one hackathon, the one linking to Unstop, Devfolio or
+  // Devpost is kept: it is the copy the next scrape will keep up to date.
+  const platformFirst = item => (/^Link:\s*https?:\/\/(?:[\w-]+\.)?(?:unstop\.com|devfolio\.co|devpost\.com)\b/m.test(item.description || '') ? 0 : 1);
+  const kept = [];
+  for (const item of [...items].sort((a, b) => platformFirst(a) - platformFirst(b))) {
     if (!isManaged(item) || item.recurrence || item.recurringEventId) continue;
     const h = fromCalendar(item);
+    const original = !isRegistrationClosed(item, now, timeZone) && !isPastEvent(item, now, timeZone) &&
+      kept.find(k => isSameHackathon(asListing(k), asListing(item)));
+    // Entries the sheet reader once built from the sheet's own text. Sheet
+    // hackathons now come from their linked page and are re-added from it.
+    const fromSheetText = /^From the .+ tab of https:\/\/docs\.google\.com\/spreadsheets\//m.test(item.description || '');
     const reason = isRegistrationClosed(item, now, timeZone) ? 'registration closed' :
-      (isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' : null));
+      (isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' :
+        (fromSheetText ? 'built from sheet text, not its link' :
+          (original ? `duplicate of "${original.summary}"` : null))));
+    if (!reason) kept.push(item);
     try {
       if (reason) {
         await client.events.delete({ calendarId, eventId: item.id });
         deleted++;
         console.log(`Removed ${reason}: ${h.name}`);
       } else {
-        const summary = calendarSummary(h);
         const colorId = getEventColorId(h);
+        const summary = calendarSummary(h, colorId);
         const deadline = registrationDeadlineDay(item, timeZone);
         const datesDiffer = deadline &&
           (item.start?.date !== deadline || item.end?.date !== addDays(deadline, 1));

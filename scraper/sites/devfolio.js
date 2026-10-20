@@ -28,6 +28,13 @@ function resolveRegistrationDeadline({ timerTimestamp, bodyText, now = new Date(
   return indexedDate && indexedDate >= today ? indexedDate : null;
 }
 
+// Devfolio has no prize amount field: "INR 20,000" is written in a prize's
+// name or description.
+function devfolioPrize(prizes) {
+  const text = (Array.isArray(prizes) ? prizes : []).map(p => [p.name, p.desc].filter(Boolean).join(': ')).join(', ');
+  return text.slice(0, 300) || null;
+}
+
 async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
   console.log('Scraping Devfolio (https://devfolio.co/hackathons/open)...');
   const hackathons = [];
@@ -205,9 +212,7 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
           }
         }
 
-        const prizes = Array.isArray(nextData?.prizes || item.initialHit?.prizes) && (nextData?.prizes || item.initialHit?.prizes).length > 0
-          ? (nextData?.prizes || item.initialHit?.prizes).map(p => p.name).slice(0, 3).join(', ')
-          : null;
+        const prizes = devfolioPrize(nextData?.prizes || item.initialHit?.prizes);
 
         let h = {
           name: name,
@@ -253,7 +258,7 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
             location: loc,
             mode: mode,
             organizer: hit.tagline || null,
-            prize: null,
+            prize: devfolioPrize(hit.prizes),
             eligibility: null,
             tags: [],
             description: hit.desc ? hit.desc.slice(0, 300) : null,
@@ -279,4 +284,4 @@ async function scrapeDevfolio({ retryDelayMs = 1000 } = {}) {
   return hackathons;
 }
 
-module.exports = { scrapeDevfolio, resolveRegistrationDeadline };
+module.exports = { scrapeDevfolio, resolveRegistrationDeadline, devfolioPrize };

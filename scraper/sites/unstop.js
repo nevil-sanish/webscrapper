@@ -62,6 +62,12 @@ function roundText(comp) {
     .join('\n');
 }
 
+// The headline "Prizes worth ₹1,00,000" is the sum of the cash in each prize.
+function unstopPrize(comp) {
+  const cash = (Array.isArray(comp.prizes) ? comp.prizes : []).reduce((sum, p) => sum + (Number(p.cash) || 0), 0);
+  return cash > 0 ? `₹${cash.toLocaleString('en-IN')}` : (comp.overall_prizes || null);
+}
+
 const sourceLink = (comp, id) => {
   const path = comp.seo_url || comp.public_url;
   if (!path) return `https://unstop.com/hackathons/${id}`;
@@ -137,7 +143,7 @@ function parseUnstopCompetition(comp, { id = comp?.id, today = localDay(new Date
     fee: fee,
     daysLeft: remainDaysText,
     organizer: comp.organization?.name || null,
-    prize: comp.overall_prizes || null,
+    prize: unstopPrize(comp),
     eligibility: null,
     tags: Array.isArray(comp.filters) ? comp.filters.map(f => f.name).filter(Boolean) : [],
     description: comp.details ? comp.details.replace(/<[^>]*>/g, ' ').slice(0, 300) : null,

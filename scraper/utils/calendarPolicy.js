@@ -1,7 +1,14 @@
 const { keralaPriority } = require('./eventPolicy');
 const { parseDateToYMD } = require('./pageParser');
-function originalName(name = '') { return name.replace(/^[12] · (?:Kerala · )?/, ''); }
-function calendarSummary(event) { return `${keralaPriority(event) ? '1 · Kerala · ' : '2 · '}${originalName(event.name)}`; }
+// Event colours are private to the calendar's owner: people the calendar is
+// shared with see one colour for everything. The dot in the title shows the
+// same green / red / blue to every viewer.
+const DOTS = { 10: '🟢', 11: '🔴', 9: '🔵' };
+function originalName(name = '') { return name.replace(/^[12] · (?:[🟢🔴🔵] )?(?:Kerala · )?/u, ''); }
+function calendarSummary(event, colorId) {
+  const dot = DOTS[colorId] ? `${DOTS[colorId]} ` : '';
+  return `${keralaPriority(event) ? `1 · ${dot}Kerala · ` : `2 · ${dot}`}${originalName(event.name)}`;
+}
 function isManaged(event) {
   return event.extendedProperties?.private?.managedBy === 'hack-scrapper' ||
     (/^Mode:/m.test(event.description || '') && /^Link:\s*https?:\/\//m.test(event.description || ''));
@@ -47,6 +54,7 @@ function fromCalendar(event) {
   return { name: originalName(event.summary || ''), description,
     mode: description.match(/^Mode:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     fee: description.match(/^Registration Fee:[ \t]*(.*)$/m)?.[1]?.trim() || '',
+    prize: description.match(/^Prize:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     location: description.match(/^Location:[ \t]*(.*)$/m)?.[1]?.trim() || event.location || '' };
 }
-module.exports = { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };
+module.exports = { DOTS, originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };

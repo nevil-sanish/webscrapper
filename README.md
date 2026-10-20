@@ -26,7 +26,7 @@ The scraper needs all three `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT
 
 ### Tracking sheet
 
-Each run also reads the **Hackathon** and **claude** tabs of the ChaiCoders Google Sheet (`scraper/sites/sheet.js`). A row becomes a calendar reminder on its **Closing Date**, with its name and the first link in **Links**. Rows with no closing date, or a closing date that has passed, are skipped. The location rules match the other sources: an offline venue in Kerala is green, one in Tamil Nadu or Karnataka is red, and anything else offline is left out. An online row needs a prize amount and is blue. Changing a row's closing date moves its reminder on the next run.
+Each run also reads the **Hackathon** and **claude** tabs of the ChaiCoders Google Sheet (`scraper/sites/sheet.js`), but only the link in column I of each row. Nothing else in the sheet is used: every link is opened and the hackathon is read from its own page. Unstop links use the Unstop API, Devpost links the Devpost API, Devfolio links the page's embedded data, Luma links the Luma event API, and any other site is parsed as a web page. The same rules and colours as the other sources then apply. A link repeated across rows or tabs is read once. A page that cannot be read, or has no open registration deadline, is listed as skipped with its reason in the run log and `scraper/scrapeReport.md`.
 
 The sheet is private. The scraper reads it with the OAuth login (`GOOGLE_CALENDAR_REFRESH_TOKEN`) when one is set, even if Calendar uses a service account, and with the service account otherwise:
 
@@ -50,9 +50,9 @@ To run this in your own GitHub repository, add the following under **Settings �
 | `SERP_API_KEY` | Optional backup search provider |
 | `SMTP_HOST`, `SMTP_PORT` | SMTP server used for deadline email |
 | `SMTP_USER`, `SMTP_PASS` | SMTP login; the user is also the sender address |
-| `REPORT_EMAIL` | Address that receives deadline email |
+| `REPORT_EMAIL` | Who receives the deadline emails; several addresses separated by commas all get the same single email |
 
-Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled daily at 06:00 UTC (11:30 IST). It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
+Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled daily at 02:45 UTC (08:15 IST). It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
 
 ### Commands and output
 
@@ -81,8 +81,8 @@ GitHub Actions restores/saves discovery state, serializes scraper runs, and uplo
 ## Event eligibility
 
 - Online hackathons with a registration fee are left out; offline ones may charge.
-- Keep online hackathons without requiring prizes from other sources; online Devpost entries require a displayed positive cash prize.
-- Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline.
+- Online hackathons are kept only when they offer prize money (for example `$2,000`, `₹1,00,000`, `INR 20,000`, `75k`), from every source. Unstop's prize is the sum of each prize's cash; Devfolio's is read from its prize names and descriptions.
+- Offline/hybrid events must have a venue in Kerala, Tamil Nadu, or Karnataka. Any offline round makes the event offline. A page with no labelled venue takes it from a short line naming a place, such as `CUSAT, Kochi, Kerala`.
 - Inspect full event descriptions and round content before truncating summaries.
 - Registration deadlines must be today or later. Web parsing supports timeline cards such as `SEP 23 / REGISTRATION CLOSES`, inferring the year only from an explicit event date on the page. Event start dates alone are not used as web registration deadlines.
 - Unrelated organizer locations do not qualify an outside venue. Unknown venues and unknown deadlines are reported rather than invented.
@@ -91,15 +91,22 @@ Discovery remains dependent on search indexing, accessible event content, and ru
 
 ## Calendar
 
-Each managed Calendar event is an all-day entry on the last day to submit the registration form, with a one-day duration. The hackathon's event dates remain in its description when available. Kerala events are green (`10`); other online events are blue (`9`), and other allowed offline events are red (`11`). Managed titles use `1 · Kerala · Name` or `2 · Name` to put Kerala first in title-sorted views. Google Calendar does not expose a per-event display-order field, so ordering cannot be guaranteed in every Calendar view.
+Each managed Calendar event is an all-day entry on the last day to submit the registration form, with a one-day duration. The hackathon's event dates remain in its description when available. Kerala events are green (`10`); other online events are blue (`9`), and other allowed offline events are red (`11`). Google shows an event's own colour only to the calendar's owner; people the calendar is shared with see every event in the one colour they picked for the calendar. So titles also carry the colour as a dot that every viewer sees: `1 · 🟢 Kerala · Name`, `2 · 🔴 Name` (Tamil Nadu or Karnataka), `2 · 🔵 Name` (online). The leading `1`/`2` puts Kerala first in title-sorted views.
+
+Two entries closing on the same day with the same link or the same name are one hackathon. Names are compared ignoring case, punctuation, a bracketed note and filler words such as "Hackathon" or the year, and one may contain the other (`BUiLDX` / `BUiLDX Hackathon`). Two different listings on one platform stay separate. Scraped results are merged this way, an existing entry is updated instead of a new one added, and maintenance (before and after each sync) deletes extra copies, keeping the one that links to Unstop, Devfolio or Devpost. It also deletes entries the old sheet reader built from the sheet's own text. Google Calendar does not expose a per-event display-order field, so ordering cannot be guaranteed in every Calendar view.
 
 At the start of each scrape, maintenance scans all Calendar pages, shortens existing managed entries to that one day, and removes reminders whose registration deadline was before today in the calendar's time zone. It reads the `Registration Deadline:` description line, falling back to the entry's start date for older reminders. The scraper also skips expired deadlines during sync, so it cannot add them back. Today's deadlines and personal entries are preserved; recurring entries are left alone. Managed entries are recognized by private metadata or legacy `Mode:` and `Link:` description lines. Events outside the location policy are also removed. Old and prefixed names are matched to avoid duplicate insertion during migration.
 
 ## Email reminders
 
-After each Calendar sync, the scraper checks managed Calendar entries for **offline hackathons in Kerala** whose registration deadline is today or within the next three calendar days (using the Calendar's time zone). If one or more qualify, it sends one plain-text email listing only their names, registration deadlines, locations, and links. It sends no email when none qualify. Online events, events outside Kerala, personal entries, and recurring entries are excluded.
+After each Calendar sync, the scraper reads its own Calendar entries and sends up to two emails:
 
-Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow. A successful send records the day in the saved discovery state, so further workflow runs that day skip email. If that cache is deleted, the daily send record is lost.
+1. **Daily digest**, every day: every hackathon whose registration closes today or in the next three days, grouped by day, with its 🟢/🔴/🔵 dot, venue or Online, prize and link. On a day with nothing closing it says so.
+2. **Kerala last-day alert**, only when needed: offline hackathons in Kerala whose registration closes **tomorrow**.
+
+Both go out at **09:00 IST**. The scheduled run starts at 08:15 IST, which leaves room for GitHub starting it late and for the scrape, and then waits until 09:00 to send. A run started before 09:00 any other way (a push, a manual run) sends no email and leaves it to the scheduled run; a run after 09:00 sends that day's emails if they have not gone out yet. Personal and recurring entries are ignored.
+
+Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow. Each email records the day it was sent in the saved discovery state, so further workflow runs that day do not send it again. If that cache is deleted, the daily send record is lost.
 
 ## Reliability
 
@@ -111,4 +118,4 @@ A run ends with a non-zero exit code, after syncing everything it did find, when
 - The venue a platform states for an in-person event is kept as given. Description text only supplies a venue for an event listed as online, and only when it names a recognisable place.
 - An event listed as online stays online when its text mentions an in-person round without a venue; the Calendar entry carries a note to check the event page.
 - Two listings on the same platform are never merged, even with the same name. Calendar entries are matched by event link first, then by name.
-- The workflow runs daily at 06:00 UTC.
+- The workflow runs daily at 02:45 UTC (08:15 IST) and sends the emails at 09:00 IST.

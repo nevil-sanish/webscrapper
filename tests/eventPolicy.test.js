@@ -5,9 +5,15 @@ const { deduplicateHackathons } = require('../scraper/utils/dedup');
 const { parseExactHackathonPage } = require('../scraper/utils/pageParser');
 const { keralaDistricts, keralaKeywords, searchKeywords } = require('../scraper/search/keywordList');
 
-test('online events need no prize, irrespective of location', () => {
+test('online events are kept only with prize money, irrespective of location', () => {
   for (const location of ['', 'Online', 'Delhi']) {
-    assert.equal(shouldKeepHackathon({ mode: 'online', location, prize: null }), true);
+    assert.equal(shouldKeepHackathon({ mode: 'online', location, prize: '$1,000' }), true);
+  }
+  for (const prize of ['$67,500', '₹1,00,000', '₹100000', 'Total Cashprize: INR 20,000', '75k', '2.8 lakhs', 'Rs. 5000']) {
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', prize }), true, prize);
+  }
+  for (const prize of [null, '', 'Winner 2026', 'Prizes for top 3', 'PS5 + swag', '$0', 'Winner, Runner Up']) {
+    assert.equal(shouldKeepHackathon({ mode: 'online', location: 'Online', prize }), false, String(prize));
   }
 });
 test('offline and hybrid events require an allowed physical location', () => {
@@ -74,4 +80,14 @@ test('hybrid and onsite wording in page content count as offline', () => {
     assert.equal(result.mode, 'offline');
     assert.equal(shouldKeepHackathon(result), true);
   }
+});
+
+test('an offline page with no venue label takes its venue card, and a venue outside the south still leaves it out', () => {
+  const kochi = classifyAttendance({ mode: 'unknown', location: '' },
+    '<h1>Make-A-Ton 9.0</h1><div>see you in Kochi</div><div>CUSAT, Kochi, Kerala</div><p>Twenty-four hours on campus at CUSAT.</p>');
+  assert.equal(kochi.location, 'CUSAT, Kochi, Kerala');
+  assert.equal(shouldKeepHackathon(kochi), true);
+  const delhi = classifyAttendance({ mode: 'unknown', location: '' },
+    '<div>IIT Delhi, New Delhi</div><p>A 24-hour offline hackathon on campus.</p>');
+  assert.equal(shouldKeepHackathon(delhi), false);
 });

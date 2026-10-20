@@ -1,4 +1,4 @@
-const { classifyAttendance, shouldKeepHackathon, keralaPriority } = require('./utils/eventPolicy');
+const { classifyAttendance, shouldKeepHackathon, keralaPriority, leftOutReason } = require('./utils/eventPolicy');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +13,8 @@ const { scrapeSheet } = require('./sites/sheet');
 const { deduplicateHackathons } = require('./utils/dedup');
 const { addEventToCalendar, isCalendarConfigured, maintainCalendar, formatDay } = require('./utils/calendar');
 const { localDay } = require('./utils/calendarPolicy');
-const { sendDeadlineEmail } = require('./utils/deadlineEmail');
+const { sendDeadlineEmail, msUntilSendTime } = require('./utils/deadlineEmail');
+const { sleep } = require('./utils/http');
 
 // Anything that could have cost a hackathon is collected here and fails the
 // run at the end, after everything that did work has been synced. A run that
@@ -54,7 +55,7 @@ function writeScrapeReport(events) {
   for (const h of events) {
     const kept = shouldKeepHackathon(h);
     lines.push(`| ${h.source} | ${cell(h.name)} | ${day(h.registrationDeadline || h.startDate)} | ${kept ? 'IN CALENDAR' : 'left out'} | ` +
-      `${kept ? '' : (h.mode === 'online' ? `online with registration fee ${cell(h.fee)}` : `${h.mode}, venue "${cell(h.location).slice(0, 60)}" is not in Kerala/Tamil Nadu/Karnataka`)} | ${h.sourceUrl} |`);
+      `${kept ? '' : cell(leftOutReason(h))} | ${h.sourceUrl} |`);
   }
   for (const stats of sourceStats) {
     for (const item of stats.skippedItems || []) {
@@ -131,6 +132,13 @@ async function run() {
 
       console.log(`Successfully added/updated ${newlyAdded.length} hackathons in Google Calendar.`);
       if (failed) problems.push(`Google Calendar: ${failed} hackathon(s) could not be saved`);
+      // A sync can rename an entry into a copy of another (same name and day);
+      // removing it now keeps a duplicate from showing until tomorrow's run.
+      try {
+        await maintainCalendar();
+      } catch (error) {
+        problems.push(`Calendar maintenance after sync: ${error.message}`);
+      }
     } else if (!isCalendarConfigured()) {
       console.warn('\n⚠️  GOOGLE CALENDAR IS NOT CONFIGURED');
       console.warn('GOOGLE_CALENDAR_REFRESH_TOKEN is empty in your .env file.');
@@ -140,7 +148,16 @@ async function run() {
     console.log('No hackathons found during this run.');
   }
 
-  if (calendarReady) {
+  // The emails go out at 09:00 IST. The scheduled morning run starts early
+  // and waits for it; any other run before 09:00 leaves them to that run.
+  const wait = msUntilSendTime();
+  if (calendarReady && wait > 0 && process.env.GITHUB_EVENT_NAME === 'schedule') {
+    console.log(`Waiting ${Math.ceil(wait / 60000)} min to send the deadline emails at 09:00 IST...`);
+    await sleep(wait);
+  }
+  if (calendarReady && msUntilSendTime() > 0) {
+    console.log('Before 09:00 IST: the deadline emails are left to the scheduled morning run.');
+  } else if (calendarReady) {
     try {
       await sendDeadlineEmail();
     } catch (error) {
