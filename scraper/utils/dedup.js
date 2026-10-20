@@ -30,9 +30,9 @@ function deduplicateHackathons(hackathons) {
     const dateNew = normalizeDate(h.startDate);
     const dateEnd = normalizeDate(h.endDate);
 
-    // Skip events that completed in the past
+    // Skip events that completed in the past, unless the sheet pins them
     const latestDate = dateEnd || dateNew;
-    if (latestDate && localDay(latestDate) < today) {
+    if (latestDate && localDay(latestDate) < today && !h.pinned) {
       continue;
     }
 
@@ -92,6 +92,7 @@ function deduplicateHackathons(hackathons) {
       if (h.isKeralaRelevant) {
         match.isKeralaRelevant = true;
       }
+      if (h.pinned) match.pinned = true;
 
       // Merge tags
       if (h.tags && Array.isArray(h.tags)) {
@@ -122,7 +123,8 @@ function deduplicateHackathons(hackathons) {
         eligibility: h.eligibility,
         tags: Array.isArray(h.tags) ? h.tags : [],
         description: h.description,
-        isKeralaRelevant: Boolean(h.isKeralaRelevant)
+        isKeralaRelevant: Boolean(h.isKeralaRelevant),
+        pinned: Boolean(h.pinned)
       });
     }
   }

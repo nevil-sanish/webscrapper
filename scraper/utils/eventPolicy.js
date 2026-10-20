@@ -102,6 +102,8 @@ const PRIZE_MONEY = /(?:[$₹€£]|\b(?:inr|rs\.?|usd|eur)\s*)\s*[1-9]|\b[1-9][
 const hasPrizeMoney = prize => PRIZE_MONEY.test(String(prize || ''));
 
 function shouldKeepHackathon(event) {
+  // Rows of the sheet's "Hackathon" tab are always kept.
+  if (event.pinned) return true;
   const h = classifyAttendance(event);
   // Every online hackathon is kept. The calendar colours it blue when it is
   // free to enter and pays prize money, purple otherwise.

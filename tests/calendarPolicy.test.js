@@ -153,3 +153,16 @@ test('maintenance removes entries built from the sheet text instead of the linke
   await maintainCalendar({ now: new Date('2026-10-20T10:00:00+05:30'), client, calendarId: 'test' });
   assert.deepEqual(deletes, ['old-sheet']);
 });
+test('entries pinned by the sheet\'s Hackathon tab survive closed registration and the venue rules', async () => {
+  const deleted = [];
+  const pinned = { id: 'p', summary: '2 · 🔴 CASCADE', colorId: '11', start: { date: '2026-09-01' }, end: { date: '2026-09-02' },
+    extendedProperties: { private: { managedBy: 'hack-scrapper' } },
+    description: 'Mode: offline\nLocation: Nagpur\nLink: https://unstop.com/x\nPinned: Hackathon tab of the tracking sheet\nRegistration Deadline: 01 Sep 2026' };
+  const client = { events: {
+    list: async () => ({ data: { items: [pinned, { ...pinned, id: 'c', description: pinned.description.replace(/^Pinned.*\n/m, '') }] } }),
+    delete: async ({ eventId }) => deleted.push(eventId),
+    patch: async () => {}
+  } };
+  await maintainCalendar({ now, client, calendarId: 'test' });
+  assert.deepEqual(deleted, ['c']);
+});

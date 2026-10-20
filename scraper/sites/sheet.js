@@ -10,10 +10,12 @@ const { parseDevpostListing } = require('./devpost');
 const { resolveRegistrationDeadline, devfolioPrize } = require('./devfolio');
 const { parseHackIndiaPage } = require('./hackindia');
 
-// The ChaiCoders tracking sheet. Only the link column (I) of each row is used:
-// every hackathon is read from its own page, never from what the sheet says.
+// The ChaiCoders tracking sheet. Each hackathon is read from its linked page.
+// Every row of the "Hackathon" tab is pinned: it always goes in the calendar,
+// built from the sheet's own row (on its Closing Date) when the page gives no date.
 const SHEET_ID = '1WXg2j6eZT5bY7vxIBkQUQaJVEDRMjI5BMOr0I_U7MQc';
 const TABS = ['Hackathon', 'claude'];
+const PINNED_TAB = 'Hackathon';
 const LINK_COLUMN = 8;
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -123,6 +125,28 @@ async function scrapeLink(url, { get = httpGet, now = new Date() } = {}) {
 }
 
 const linkOf = row => String(row[LINK_COLUMN] ?? '').match(/https?:\/\/[^\s,]+/)?.[0];
+const cell = (row, i) => String(row[i] ?? '').trim();
+
+// A pinned row as the sheet itself states it: name, Closing Date (else Date), venue, prize.
+function fromRow(row, url) {
+  const deadline = parseDateToYMD(cell(row, 3)) || parseDateToYMD(cell(row, 2));
+  if (!deadline) return null;
+  const location = cell(row, 6);
+  return classifyAttendance({
+    name: cell(row, 0).replace(/\s+/g, ' '),
+    source: 'sheet',
+    sourceUrl: url || `https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
+    mode: !location || /^(?:fully )?online\b/i.test(location) ? 'online' : 'offline',
+    location: location || 'Online',
+    prize: cell(row, 5) || null,
+    startDate: deadline,
+    endDate: parseDateToYMD(cell(row, 2)) || deadline,
+    registrationDeadline: deadline,
+    eventConductedDate: parseDateToYMD(cell(row, 2)),
+    description: cell(row, 1).slice(0, 300) || null,
+    attendanceAnalyzed: true
+  });
+}
 
 async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } = {}) {
   console.log('Reading the links in the ChaiCoders hackathon sheet...');
@@ -131,6 +155,8 @@ async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } =
   events.stats = stats;
 
   // The same hackathon is often listed twice, in one tab or across both.
+  // Pinned rows without a link are keyed by name; one that repeats a linked
+  // row of the same name ("IQOO Hyderabad" listed twice) is that row.
   const links = new Map();
   for (const tab of TABS) {
     let rows;
@@ -141,20 +167,44 @@ async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } =
       console.error(`Sheet tab "${tab}" failed: ${error.message}`);
       continue;
     }
-    for (const row of rows.slice(1)) {
+    const pinned = tab === PINNED_TAB;
+    const named = rows.slice(1).filter(row => cell(row, 0));
+    const sameName = row => named.filter(other => cell(other, 0).toLowerCase() === cell(row, 0).toLowerCase());
+    for (let row of named) {
       const url = linkOf(row);
-      if (url && !links.has(url)) links.set(url, `${String(row[0] || '').trim()} [${tab}]`);
+      const key = url || (pinned && `name:${cell(row, 0).toLowerCase()}`);
+      if (!key || links.has(key)) continue;
+      if (!url && sameName(row).some(linkOf)) continue;
+      // A row without dates takes them from its twin ("Bit N Build" is listed
+      // once with the link and once with the dates).
+      const dated = sameName(row).find(other => cell(other, 3) || cell(other, 2));
+      if (dated && !cell(row, 3) && !cell(row, 2)) row = Object.assign([...row], { 2: dated[2], 3: dated[3] });
+      links.set(key, { url, row, pinned, label: `${cell(row, 0)} [${tab}]` });
     }
   }
   stats.reported = stats.listed = links.size;
 
   const seen = new Set();
-  for (const [url, label] of links) {
-    let result;
-    try {
-      result = await scrapeLink(url, { get, now });
-    } catch (error) {
-      result = `page could not be read (${error.response?.status || error.code || error.message})`;
+  for (const { url, row, pinned, label } of links.values()) {
+    let result = 'no link in the sheet';
+    if (url) {
+      try {
+        result = await scrapeLink(url, { get, now });
+      } catch (error) {
+        result = `page could not be read (${error.response?.status || error.code || error.message})`;
+      }
+    }
+    if (pinned) {
+      const sheet = fromRow(row, url);
+      // The page's own dates win; the sheet fills in what the page could not give.
+      if (typeof result !== 'string' && !result.registrationDeadline && sheet) {
+        result = { ...result, registrationDeadline: sheet.registrationDeadline, startDate: sheet.startDate };
+      }
+      if (typeof result === 'string' || !result.registrationDeadline) {
+        if (sheet) console.log(`  sheet pinned from its row: ${label} - ${result} (${url || 'no link'})`);
+        result = sheet || `pinned but the sheet gives no date (${result})`;
+      }
+      if (typeof result !== 'string') result = { ...result, pinned: true };
     }
     if (typeof result === 'string') {
       stats.skippedItems.push({ name: label, url, reason: result });
@@ -164,7 +214,7 @@ async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } =
       seen.add(result.sourceUrl);
       events.push(result);
     }
-    await sleep(100);
+    if (url) await sleep(100);
   }
 
   // A link whose page is down or unreadable is reported as skipped, not as a

@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { scrapeSheet } = require('../scraper/sites/sheet');
-const { getEventColorId } = require('../scraper/utils/calendar');
+const { getEventColorId, calendarWindow } = require('../scraper/utils/calendar');
+const { shouldKeepHackathon } = require('../scraper/utils/eventPolicy');
+const { deduplicateHackathons } = require('../scraper/utils/dedup');
 
 const now = new Date('2026-10-19T10:00:00+05:30');
 // Column I (index 8) holds the link in both tabs; the Hackathon tab's header there is a stray "`".
@@ -64,7 +66,9 @@ test('each sheet link is read from its own page, with the same filters and color
   const byName = Object.fromEntries(results.map(h => [h.name, h]));
 
   // Names, dates, venues and prizes come from the pages, not the sheet.
-  assert.deepEqual(Object.keys(byName).sort(), ['Campus Hack', 'DevHack 2026', 'Devin Hacks Kochi', 'No Prize Online Hackathon', 'PayPal AI Hackathon', 'haxfinity']);
+  // "No link" is a Hackathon-tab row: pinned, built from the sheet itself.
+  assert.deepEqual(Object.keys(byName).sort(), ['Campus Hack', 'DevHack 2026', 'Devin Hacks Kochi', 'No Prize Online Hackathon', 'No link', 'PayPal AI Hackathon', 'haxfinity']);
+  assert.equal(byName['No link'].registrationDeadline, '2099-01-01');
   assert.equal(byName['DevHack 2026'].registrationDeadline, '2026-10-22');
   assert.equal(byName['DevHack 2026'].prize, '₹1,00,000');
   assert.equal(byName['haxfinity'].registrationDeadline, '2026-11-10');
@@ -84,4 +88,44 @@ test('each sheet link is read from its own page, with the same filters and color
   assert.match(reasons.HFT, /registration closed/);
   assert.match(reasons.SAP, /403/);
   assert.equal(results.stats.complete, true);
+});
+
+test('every Hackathon-tab row is kept, on its Closing Date when the link gives no date', async () => {
+  const sheetRow = (name, closing, location, link = '') => [name, '', '', closing, '', '', location, 'No', link];
+  const tabs = {
+    Hackathon: [['Hackathon'],
+      // Out of state, so the claude tab would leave it out.
+      sheetRow('CASCADE', '19/10/2026', 'IIIT Nagpur', 'https://unstop.com/hackathons/cascade26-1766233'),
+      // Registration closed on the page, and the closing date is in the past.
+      sheetRow('HFT', '15/09/2026', 'MEC Kochi', 'https://hft2026.devfolio.co/'),
+      // The page cannot be read.
+      sheetRow('SAP Hackfest', '25/10/2026', 'Bengaluru', 'https://events.sap.example/home'),
+      // No link; and a name-only repeat of a linked row is that row.
+      sheetRow('Bit N Build', '17/09/2026', ''),
+      // Its twin with the link but no dates takes the dates above.
+      sheetRow('Bit N Build', '', 'Mumbai', 'https://events.sap.example/bitnbuild'),
+      ['SAP Hackfest'],
+      // Nothing to date it by.
+      sheetRow('Undated', '', 'Online', 'https://events.sap.example/undated')],
+    claude: []
+  };
+  const results = await scrapeSheet({ read: async tab => tabs[tab], get, now });
+  const byName = Object.fromEntries(results.map(h => [h.name, h]));
+
+  assert.deepEqual(Object.keys(byName).sort(), ['Bit N Build', 'CASCADE 26 Hackathon', 'HFT', 'SAP Hackfest']);
+  assert.equal(byName['CASCADE 26 Hackathon'].registrationDeadline, '2026-10-25');
+  assert.equal(byName.HFT.registrationDeadline, '2026-09-15');
+  assert.equal(byName['SAP Hackfest'].registrationDeadline, '2026-10-25');
+  assert.equal(byName['Bit N Build'].registrationDeadline, '2026-09-17');
+  assert.equal(byName['Bit N Build'].location, 'Mumbai');
+  for (const h of results) {
+    assert.equal(shouldKeepHackathon(h), true, h.name);
+    assert.ok(calendarWindow(h, now), h.name);
+  }
+  assert.match(results.stats.skippedItems.map(s => s.reason).join(), /pinned but the sheet gives no date/);
+  // Merged into another source's copy, the hackathon stays pinned.
+  const [merged] = deduplicateHackathons([{ name: 'CASCADE 26 Hackathon', source: 'unstop', startDate: '2026-10-25', mode: 'offline', location: 'Nagpur' }, byName['CASCADE 26 Hackathon']]);
+  assert.equal(merged.pinned, true);
+  // Past pinned rows are not dropped as completed events.
+  assert.equal(deduplicateHackathons(results).length, results.length);
 });

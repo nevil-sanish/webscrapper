@@ -1,4 +1,4 @@
-const { originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
+const { PINNED_NOTE, originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay } = require('./calendarPolicy');
 const { parseDateToYMD } = require('./pageParser');
 const { shouldKeepHackathon } = require('./eventPolicy');
 const { isSameHackathon } = require('./normalize');
@@ -248,7 +248,7 @@ function formatDay(ymd) {
 function calendarWindow(hackathon, now = new Date()) {
   const deadline = toDay(hackathon.registrationDeadline || hackathon.startDate);
   if (!deadline) return null;
-  if (deadline < localDay(now)) return null;
+  if (deadline < localDay(now) && !hackathon.pinned) return null;
 
   return { start: deadline, end: addDays(deadline, 1) };
 }
@@ -282,6 +282,7 @@ async function addEventToCalendar(hackathon) {
   if (String(hackathon.mode).toLowerCase() === 'online' && hackathon.attendanceEvidence) {
     desc += 'Note: the listing mentions an in-person round without giving a venue - check the event page.\n';
   }
+  if (hackathon.pinned) desc += `${PINNED_NOTE}\n`;
   if (hackathon.fee) desc += `Registration Fee: ${hackathon.fee}\n`;
   if (hackathon.daysLeft) desc += `Days Left: ${hackathon.daysLeft}\n`;
 
@@ -437,7 +438,8 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
     // Entries the sheet reader once built from the sheet's own text. Sheet
     // hackathons now come from their linked page and are re-added from it.
     const fromSheetText = /^From the .+ tab of https:\/\/docs\.google\.com\/spreadsheets\//m.test(item.description || '');
-    const reason = isRegistrationClosed(item, now, timeZone) ? 'registration closed' :
+    const reason = h.pinned ? (original ? `duplicate of "${original.summary}"` : null) :
+      isRegistrationClosed(item, now, timeZone) ? 'registration closed' :
       (isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' :
         (fromSheetText ? 'built from sheet text, not its link' :
           (original ? `duplicate of "${original.summary}"` : null))));

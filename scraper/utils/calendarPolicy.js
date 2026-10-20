@@ -4,6 +4,9 @@ const { parseDateToYMD } = require('./pageParser');
 // shared with see one colour for everything. The dot in the title shows the
 // same green / red / blue to every viewer.
 const DOTS = { 10: '🟢', 11: '🔴', 9: '🔵', 3: '🟣' };
+// Written into entries for the sheet's "Hackathon" tab, which are never removed.
+const PINNED_NOTE = 'Pinned: Hackathon tab of the tracking sheet';
+const PINNED_LINE = /^Pinned: Hackathon tab/m;
 function originalName(name = '') { return name.replace(/^[12] · (?:[🟢🔴🔵🟣] )?(?:Kerala · )?/u, ''); }
 function calendarSummary(event, colorId) {
   const dot = DOTS[colorId] ? `${DOTS[colorId]} ` : '';
@@ -55,6 +58,7 @@ function fromCalendar(event) {
     mode: description.match(/^Mode:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     fee: description.match(/^Registration Fee:[ \t]*(.*)$/m)?.[1]?.trim() || '',
     prize: description.match(/^Prize:[ \t]*(.*)$/m)?.[1]?.trim() || '',
-    location: description.match(/^Location:[ \t]*(.*)$/m)?.[1]?.trim() || event.location || '' };
+    location: description.match(/^Location:[ \t]*(.*)$/m)?.[1]?.trim() || event.location || '',
+    pinned: PINNED_LINE.test(description) };
 }
-module.exports = { DOTS, originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };
+module.exports = { DOTS, PINNED_NOTE, originalName, calendarSummary, isManaged, registrationDeadlineDay, isRegistrationClosed, isPastEvent, fromCalendar, localDay };
