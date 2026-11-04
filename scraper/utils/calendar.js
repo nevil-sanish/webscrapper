@@ -248,7 +248,9 @@ function formatDay(ymd) {
 function calendarWindow(hackathon, now = new Date()) {
   const deadline = toDay(hackathon.registrationDeadline || hackathon.startDate);
   if (!deadline) return null;
-  if (deadline < localDay(now) && !hackathon.pinned) return null;
+  // Pinned rows too: maintenance deletes past entries, so adding one would
+  // only make a fresh copy every run.
+  if (deadline < localDay(now)) return null;
 
   return { start: deadline, end: addDays(deadline, 1) };
 }

@@ -38,3 +38,8 @@ test('Date objects and timestamps use the event timezone for the deadline', () =
 test('an entry with no usable deadline is skipped', () => {
   assert.equal(calendarWindow({ name: 'No dates' }, now), null);
 });
+
+test('a past pinned row is not re-added, so maintenance has nothing to delete again', () => {
+  assert.equal(calendarWindow({ name: 'Old', pinned: true, registrationDeadline: '2026-09-01' }, now), null);
+  assert.deepEqual(calendarWindow({ name: 'New', pinned: true, registrationDeadline: '2026-09-30' }, now), { start: '2026-09-30', end: '2026-10-01' });
+});
