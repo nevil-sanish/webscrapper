@@ -163,6 +163,22 @@ test('entries pinned by the sheet\'s Hackathon tab survive closed registration a
     delete: async ({ eventId }) => deleted.push(eventId),
     patch: async () => {}
   } };
-  await maintainCalendar({ now, client, calendarId: 'test' });
+  await maintainCalendar({ now: new Date('2026-09-01T06:00:00Z'), client, calendarId: 'test' });
   assert.deepEqual(deleted, ['c']);
+});
+test('past entries are removed whatever their source, pinned ones included', async () => {
+  const deleted = [];
+  const base = { start: { date: '2026-09-10' }, end: { date: '2026-09-11' },
+    extendedProperties: { private: { managedBy: 'hack-scrapper' } } };
+  const items = [
+    { ...base, id: 'pinned', summary: 'A', description: 'Mode: online\nLink: https://example.com/a\nPinned: Hackathon tab of the tracking sheet' },
+    { ...base, id: 'devpost', summary: 'B', description: 'Mode: online\nLink: https://devpost.com/b' },
+    { ...base, id: 'upcoming', summary: 'C', start: { date: '2026-09-30' }, end: { date: '2026-10-01' },
+      description: 'Mode: online\nLink: https://example.com/c\nPinned: Hackathon tab of the tracking sheet' },
+    { id: 'personal', summary: 'Dentist', start: { date: '2026-09-10' }, end: { date: '2026-09-11' } }
+  ];
+  const client = { events: { list: async () => ({ data: { items } }),
+    delete: async ({ eventId }) => deleted.push(eventId), patch: async () => {} } };
+  await maintainCalendar({ now, client, calendarId: 'test' });
+  assert.deepEqual(deleted.sort(), ['devpost', 'pinned']);
 });

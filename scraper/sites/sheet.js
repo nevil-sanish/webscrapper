@@ -164,7 +164,10 @@ async function scrapeSheet({ read = readTab, get = httpGet, now = new Date() } =
       rows = await read(tab);
     } catch (error) {
       stats.failedPages++;
-      console.error(`Sheet tab "${tab}" failed: ${error.message}`);
+      const hint = /invalid_grant/.test(error.message)
+        ? ' - the Google refresh token expired or was revoked. Run `npm run auth:calendar`, then update the GOOGLE_CALENDAR_REFRESH_TOKEN secret on GitHub.'
+        : '';
+      console.error(`Sheet tab "${tab}" failed: ${error.message}${hint}`);
       continue;
     }
     const pinned = tab === PINNED_TAB;
