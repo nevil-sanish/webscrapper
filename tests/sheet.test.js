@@ -120,7 +120,9 @@ test('every Hackathon-tab row is kept, on its Closing Date when the link gives n
   assert.equal(byName['Bit N Build'].location, 'Mumbai');
   for (const h of results) {
     assert.equal(shouldKeepHackathon(h), true, h.name);
-    assert.ok(calendarWindow(h, now), h.name);
+    // A past row gets no calendar slot: maintenance deletes past entries.
+    const deadline = String(h.registrationDeadline || h.startDate).slice(0, 10);
+    assert.equal(Boolean(calendarWindow(h, now)), deadline >= now.toISOString().slice(0, 10), h.name);
   }
   assert.match(results.stats.skippedItems.map(s => s.reason).join(), /pinned but the sheet gives no date/);
   // Merged into another source's copy, the hackathon stays pinned.

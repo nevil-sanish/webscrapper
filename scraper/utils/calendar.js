@@ -248,7 +248,9 @@ function formatDay(ymd) {
 function calendarWindow(hackathon, now = new Date()) {
   const deadline = toDay(hackathon.registrationDeadline || hackathon.startDate);
   if (!deadline) return null;
-  if (deadline < localDay(now) && !hackathon.pinned) return null;
+  // Pinned rows too: maintenance deletes past entries, so adding one would
+  // only make a fresh copy every run.
+  if (deadline < localDay(now)) return null;
 
   return { start: deadline, end: addDays(deadline, 1) };
 }
@@ -438,9 +440,11 @@ async function maintainCalendar({ now = new Date(), client = calendar, calendarI
     // Entries the sheet reader once built from the sheet's own text. Sheet
     // hackathons now come from their linked page and are re-added from it.
     const fromSheetText = /^From the .+ tab of https:\/\/docs\.google\.com\/spreadsheets\//m.test(item.description || '');
-    const reason = h.pinned ? (original ? `duplicate of "${original.summary}"` : null) :
+    // Past entries go whatever their source, pinned sheet rows included.
+    const reason = isPastEvent(item, now, timeZone) ? 'past event' :
+      h.pinned ? (original ? `duplicate of "${original.summary}"` : null) :
       isRegistrationClosed(item, now, timeZone) ? 'registration closed' :
-      (isPastEvent(item, now, timeZone) ? 'past event' : (!shouldKeepHackathon(h) ? 'outside event policy' :
+      ((!shouldKeepHackathon(h) ? 'outside event policy' :
         (fromSheetText ? 'built from sheet text, not its link' :
           (original ? `duplicate of "${original.summary}"` : null))));
     if (!reason) kept.push(item);
