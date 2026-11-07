@@ -56,7 +56,7 @@ To run this in your own GitHub repository, add the following under **Settings �
 | `SMTP_USER`, `SMTP_PASS` | SMTP login; the user is also the sender address |
 | `REPORT_EMAIL` | Who receives the deadline emails; several addresses separated by commas all get the same single email |
 
-Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled daily at 02:45 UTC (08:15 IST). It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
+Never add `.env` to Git. If you make a new OAuth client, update its client ID and client secret in GitHub as well as the refresh token. The workflow in `.github/workflows/scrape.yml` runs on pushes, can be started from **Actions → Hack Scrapper & Calendar Sync → Run workflow**, and is scheduled daily at 03:30 UTC (09:00 IST). It installs dependencies and Chromium, runs the scraper, saves its discovery cache, and uploads a discovery report. Check the run log if it fails.
 
 ### Commands and output
 
@@ -108,9 +108,9 @@ After each Calendar sync, the scraper reads its own Calendar entries and sends u
 1. **Daily digest**, every day: every hackathon whose registration closes today or in the next three days, grouped by day, with its 🟢/🔴/🔵 dot, venue or Online, prize and link. On a day with nothing closing it says so.
 2. **Kerala last-day alert**, only when needed: offline hackathons in Kerala whose registration closes **tomorrow**.
 
-Both go out at **09:00 IST**. The scheduled run starts at 08:15 IST, which leaves room for GitHub starting it late and for the scrape, and then waits until 09:00 to send. A run started before 09:00 any other way (a push, a manual run) sends no email and leaves it to the scheduled run; a run after 09:00 sends that day's emails if they have not gone out yet. Personal and recurring entries are ignored.
+Both go out on every workflow run (scheduled, push or manual), after the calendar sync; the digest is always sent, the Kerala alert only when one applies. Personal and recurring entries are ignored.
 
-Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow. Each email records the day it was sent in the saved discovery state, so further workflow runs that day do not send it again. If that cache is deleted, the daily send record is lost.
+Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `REPORT_EMAIL` in `.env` for local runs or as GitHub Actions repository secrets for the workflow.
 
 ## Reliability
 
@@ -122,4 +122,4 @@ A run ends with a non-zero exit code, after syncing everything it did find, when
 - The venue a platform states for an in-person event is kept as given. Description text only supplies a venue for an event listed as online, and only when it names a recognisable place.
 - An event listed as online stays online when its text mentions an in-person round without a venue; the Calendar entry carries a note to check the event page.
 - Two listings on the same platform are never merged, even with the same name. Calendar entries are matched by event link first, then by name.
-- The workflow runs daily at 02:45 UTC (08:15 IST) and sends the emails at 09:00 IST.
+- The workflow runs daily at 03:30 UTC (09:00 IST) and sends the emails on every run.

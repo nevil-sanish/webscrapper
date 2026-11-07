@@ -2,22 +2,8 @@ const nodemailer = require('nodemailer');
 const { classifyAttendance, keralaPriority, shouldKeepHackathon } = require('./eventPolicy');
 const { isManaged, registrationDeadlineDay, fromCalendar, localDay, DOTS } = require('./calendarPolicy');
 const { getCalendarClient, getEventColorId, formatDay } = require('./calendar');
-const { loadState } = require('../search/state');
 
 const DAYS_AHEAD = 3;
-// The emails go out at 09:00 India time.
-const SEND_AT = { hour: 9, minute: 0 };
-
-/**
- * How long to wait before the day's emails may go out: 0 once 09:00 IST has
- * passed, otherwise the milliseconds left until then.
- */
-function msUntilSendTime(now = new Date()) {
-  const ist = new Date(now.getTime() + 330 * 60000); // IST is UTC+5:30, no daylight saving
-  const sendAt = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), SEND_AT.hour, SEND_AT.minute) - 330 * 60000;
-  return Math.max(0, sendAt - now.getTime());
-}
-
 function addDays(day, count) {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + count);
@@ -121,63 +107,47 @@ function mailerFor(env, transport) {
 }
 
 /**
- * Sends, at most once per day each:
+ * Sends, on every run:
  * 1. a digest of every hackathon whose registration closes today through three days out;
- * 2. an alert for offline Kerala hackathons whose registration closes tomorrow.
- * The day a mail was sent is saved, so a second run that day sends nothing again.
+ * 2. an alert for offline Kerala hackathons whose registration closes tomorrow, if there are any.
  */
 async function sendDeadlineEmail({
   now = new Date(),
   calendarClient = getCalendarClient(),
   env = process.env,
-  state = loadState(undefined, now),
   transport
 } = {}) {
   const timeZone = 'Asia/Kolkata';
   const today = localDay(now, timeZone);
-  const sentDigest = state.data.deadlineEmail?.lastSentDay === today;
-  const sentAlert = state.data.keralaLastDayEmail?.lastSentDay === today;
   const result = { digest: 0, keralaTomorrow: 0, sent: [] };
-  if (sentDigest && sentAlert) {
-    console.log('Deadline emails already sent today; skipping.');
-    return result;
-  }
   if (!calendarClient) throw new Error('Google Calendar is required for deadline email');
 
   const items = await listCalendar(calendarClient, env.GOOGLE_CALENDAR_ID || 'primary');
   const send = mailerFor(env, transport);
 
-  if (!sentAlert) {
-    const tomorrow = keralaClosingTomorrow(items, now, timeZone);
-    result.keralaTomorrow = tomorrow.length;
-    if (tomorrow.length) {
-      await send({
-        subject: `Tomorrow is the last day: ${tomorrow.map(e => e.name).join(', ')}`,
-        text: [`Registration for ${tomorrow.length === 1 ? 'this offline Kerala hackathon' : 'these offline Kerala hackathons'} closes tomorrow, ${formatDay(tomorrow[0].deadline)}.`, '',
-          ...tomorrow.flatMap(e => [...eventLines(e), ''])].join('\n').trim()
-      });
-      state.data.keralaLastDayEmail = { lastSentDay: today };
-      state.save();
-      result.sent.push('keralaTomorrow');
-      console.log(`Kerala last-day email sent for ${tomorrow.length} hackathon(s).`);
-    } else {
-      console.log('No offline Kerala registration closes tomorrow; no alert sent.');
-    }
+  const tomorrow = keralaClosingTomorrow(items, now, timeZone);
+  result.keralaTomorrow = tomorrow.length;
+  if (tomorrow.length) {
+    await send({
+      subject: `Tomorrow is the last day: ${tomorrow.map(e => e.name).join(', ')}`,
+      text: [`Registration for ${tomorrow.length === 1 ? 'this offline Kerala hackathon' : 'these offline Kerala hackathons'} closes tomorrow, ${formatDay(tomorrow[0].deadline)}.`, '',
+        ...tomorrow.flatMap(e => [...eventLines(e), ''])].join('\n').trim()
+    });
+    result.sent.push('keralaTomorrow');
+    console.log(`Kerala last-day email sent for ${tomorrow.length} hackathon(s).`);
+  } else {
+    console.log('No offline Kerala registration closes tomorrow; no alert sent.');
   }
 
-  if (!sentDigest) {
-    const events = upcomingDeadlines(items, now, timeZone);
-    result.digest = events.length;
-    await send({
-      subject: `Hackathons closing in the next ${DAYS_AHEAD} days (${events.length}) - ${formatDay(today)}`,
-      text: digestText(events, today)
-    });
-    state.data.deadlineEmail = { lastSentDay: today };
-    state.save();
-    result.sent.push('digest');
-    console.log(`Daily deadline email sent with ${events.length} hackathon(s).`);
-  }
+  const events = upcomingDeadlines(items, now, timeZone);
+  result.digest = events.length;
+  await send({
+    subject: `Hackathons closing in the next ${DAYS_AHEAD} days (${events.length}) - ${formatDay(today)}`,
+    text: digestText(events, today)
+  });
+  result.sent.push('digest');
+  console.log(`Deadline email sent with ${events.length} hackathon(s).`);
   return result;
 }
 
-module.exports = { upcomingDeadlines, keralaClosingTomorrow, digestText, sendDeadlineEmail, msUntilSendTime };
+module.exports = { upcomingDeadlines, keralaClosingTomorrow, digestText, sendDeadlineEmail };

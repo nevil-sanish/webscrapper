@@ -14,8 +14,7 @@ const { scrapeHackIndia } = require('./sites/hackindia');
 const { deduplicateHackathons } = require('./utils/dedup');
 const { addEventToCalendar, isCalendarConfigured, maintainCalendar, formatDay } = require('./utils/calendar');
 const { localDay } = require('./utils/calendarPolicy');
-const { sendDeadlineEmail, msUntilSendTime } = require('./utils/deadlineEmail');
-const { sleep } = require('./utils/http');
+const { sendDeadlineEmail } = require('./utils/deadlineEmail');
 
 // Anything that could have cost a hackathon is collected here and fails the
 // run at the end, after everything that did work has been synced. A run that
@@ -151,16 +150,8 @@ async function run() {
     console.log('No hackathons found during this run.');
   }
 
-  // The emails go out at 09:00 IST. The scheduled morning run starts early
-  // and waits for it; any other run before 09:00 leaves them to that run.
-  const wait = msUntilSendTime();
-  if (calendarReady && wait > 0 && process.env.GITHUB_EVENT_NAME === 'schedule') {
-    console.log(`Waiting ${Math.ceil(wait / 60000)} min to send the deadline emails at 09:00 IST...`);
-    await sleep(wait);
-  }
-  if (calendarReady && msUntilSendTime() > 0) {
-    console.log('Before 09:00 IST: the deadline emails are left to the scheduled morning run.');
-  } else if (calendarReady) {
+  // Every run sends the deadline emails.
+  if (calendarReady) {
     try {
       await sendDeadlineEmail();
     } catch (error) {

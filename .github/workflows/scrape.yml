@@ -3,11 +3,9 @@ name: Hack Scrapper & Calendar Sync
 on:
   push:
   schedule:
-    # Starts at 02:45 UTC (08:15 IST) every day; the run then holds the deadline
-    # emails until exactly 09:00 IST. The 45 minutes cover GitHub starting
-    # scheduled runs late and the scrape itself. Registration windows can be a
-    # week or less, so a skipped day is a large share of the time to react.
-    - cron: '45 2 * * *'
+    # 03:30 UTC is 09:00 IST. Registration windows can be a week or less, so a
+    # skipped day is a large share of the time to react.
+    - cron: '30 3 * * *'
   workflow_dispatch: # Allows manual triggering from GitHub UI
 
 concurrency:
